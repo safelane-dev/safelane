@@ -1,0 +1,9 @@
+Registered payments-api in production.
+
+Releasing        container "payments-api" in Rollout "payments-api" (namespace payments)
+Watching         background analysis "success-rate", checked by Prometheus
+Will change      the container image, and the canary steps
+Will not change  probes, resources, replicas, environment, secrets, ports, Services,
+                 the traffic router, or your health analysis
+
+Say "Deploy payments-api to production" when you are ready.

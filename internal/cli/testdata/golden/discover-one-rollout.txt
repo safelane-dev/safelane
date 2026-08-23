@@ -1,0 +1,6 @@
+Read namespace payments through context safelane-caller-payments-api.
+This repository is acme/payments-api.
+
+Rollout payments-api
+  containers   payments-api  ghcr.io/acme/payments-api@sha256:1111111111111111111111111111111111111111111111111111111111111111
+  releasable   yes

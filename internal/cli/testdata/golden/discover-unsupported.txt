@@ -1,0 +1,7 @@
+Read namespace payments through context safelane-caller-payments-api.
+This repository is acme/payments-api.
+
+Rollout legacy-api
+  containers   legacy-api  ghcr.io/acme/legacy-api:v3
+  releasable   no
+               This Rollout uses a blue-green strategy. SafeLane releases in canary steps, where a share of real traffic decides whether to continue.

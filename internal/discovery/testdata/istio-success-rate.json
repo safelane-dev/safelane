@@ -1,0 +1,22 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "AnalysisTemplate",
+  "metadata": {"name": "istio-success-rate", "namespace": "istio-rollout"},
+  "spec": {
+    "args": [{"name": "service"}],
+    "metrics": [
+      {
+        "name": "success-rate",
+        "interval": "20s",
+        "successCondition": "result[0] >= 0.90",
+        "failureLimit": 3,
+        "provider": {
+          "prometheus": {
+            "address": "http://prometheus.istio-system:9090",
+            "query": "sum(irate(istio_requests_total{reporter=\"source\"}[40s]))"
+          }
+        }
+      }
+    ]
+  }
+}

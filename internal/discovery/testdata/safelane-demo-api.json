@@ -1,0 +1,25 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Rollout",
+  "metadata": {"name": "safelane-demo-api", "namespace": "safelane-demo-api"},
+  "spec": {
+    "replicas": 2,
+    "strategy": {
+      "canary": {
+        "stableService": "safelane-demo-api-stable",
+        "canaryService": "safelane-demo-api-canary",
+        "analysis": {
+          "templates": [{"templateName": "success-rate"}],
+          "args": [{"name": "service-name", "value": "safelane-demo-api-canary"}]
+        }
+      }
+    },
+    "template": {
+      "spec": {
+        "containers": [
+          {"name": "api", "image": "ghcr.io/andrewmaged814/safelane-demo-api@sha256:1111111111111111111111111111111111111111111111111111111111111111"}
+        ]
+      }
+    }
+  }
+}

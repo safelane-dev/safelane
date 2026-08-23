@@ -1,0 +1,39 @@
+{
+  "apiVersion": "argoproj.io/v1alpha1",
+  "kind": "Rollout",
+  "metadata": {"name": "istio-rollout", "namespace": "istio-rollout"},
+  "spec": {
+    "replicas": 1,
+    "strategy": {
+      "canary": {
+        "canaryService": "istio-rollout-canary",
+        "stableService": "istio-rollout-stable",
+        "trafficRouting": {
+          "istio": {
+            "virtualService": {"name": "istio-rollout-vsvc", "routes": ["primary"]}
+          }
+        },
+        "analysis": {
+          "templates": [{"templateName": "istio-success-rate"}],
+          "startingStep": 1,
+          "args": [{"name": "service", "value": "istio-rollout-canary"}]
+        },
+        "steps": [
+          {"setWeight": 10},
+          {"pause": {"duration": "10s"}},
+          {"setWeight": 20},
+          {"pause": {"duration": "10s"}},
+          {"setWeight": 90},
+          {"pause": {}}
+        ]
+      }
+    },
+    "template": {
+      "spec": {
+        "containers": [
+          {"name": "istio-rollout", "image": "argoproj/rollouts-demo:blue"}
+        ]
+      }
+    }
+  }
+}

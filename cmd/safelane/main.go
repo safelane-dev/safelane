@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
+	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/discovery"
 	"github.com/AndrewMaged814/safelane/internal/project"
 	"github.com/spf13/cobra"
 )
@@ -134,7 +136,65 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "select an application outside its repository")
 	root.AddCommand(setupGroup(rt), legacyLeaf(rt, "doctor [--json]", "Check whether SafeLane can release right now", cli.DoctorCommand(rt.root), injectProject))
 	root.AddCommand(releaseGroup(rt), completionCommand(root), versionCommand())
+	root.AddCommand(discoverCommand(rt), registerCommand(rt))
 	return root
+}
+
+// discoverCommand and registerCommand are the first two commands on the new
+// surface (decision 11): no `setup` prefix, the positional argument is the
+// thing the user actually says, and output shape follows where it is going
+// rather than a flag.
+func discoverCommand(rt commandRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "discover <namespace>",
+		Short: "Read one namespace and report what SafeLane could release",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			forceJSON, _ := cmd.Flags().GetBool("json")
+			code := cli.Discover(cmd.Context(), cli.DiscoverOptions{
+				Root:      rt.root,
+				Namespace: args[0],
+				ForceJSON: forceJSON,
+				Service:   discovery.Service{},
+			}, rt.stdout, rt.stderr)
+			if code != cli.ExitOK {
+				return exitError{code: code}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Bool("json", false, "force machine output at a terminal")
+	return cmd
+}
+
+func registerCommand(rt commandRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "register <selection-json-path|->",
+		Short: "Confirm a discovered selection and write the configuration",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			forceJSON, _ := cmd.Flags().GetBool("json")
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			code := cli.Register(cmd.Context(), cli.RegisterOptions{
+				Root:          rt.root,
+				Home:          home,
+				SelectionPath: args[0],
+				App:           rt.app,
+				ForceJSON:     forceJSON,
+				Service:       discovery.Service{},
+				Stdin:         os.Stdin,
+			}, rt.stdout, rt.stderr)
+			if code != cli.ExitOK {
+				return exitError{code: code}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Bool("json", false, "force machine output at a terminal")
+	return cmd
 }
 
 type argInjector func(commandRuntime, []string) []string
