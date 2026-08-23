@@ -6,10 +6,16 @@
 #
 # Per-app data lives in cluster/apps/<app>/ -- app.env plus the two manifests.
 # The scripts stay generic; only the data differs.
+#
+# SAFELANE_ENVIRONMENT names the environment these identities belong to. It is
+# the second half of every derived SafeLane path, and it is read from the
+# environment rather than from a configuration file on purpose: installing this
+# cluster must not require SafeLane configuration to exist first.
 CLUSTER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PATH="${HOME}/.local/bin:${PATH}"
 
 SAFELANE_APP="${SAFELANE_APP:-safelane-demo-api}"
+SAFELANE_ENVIRONMENT="${SAFELANE_ENVIRONMENT:-production}"
 APP_DIR="${CLUSTER_DIR}/apps/${SAFELANE_APP}"
 if [ ! -f "${APP_DIR}/app.env" ]; then
   echo "unknown app '${SAFELANE_APP}'. Available: $(ls "${CLUSTER_DIR}/apps" | tr '\n' ' ')" >&2
@@ -17,7 +23,11 @@ if [ ! -f "${APP_DIR}/app.env" ]; then
 fi
 # shellcheck disable=SC1090
 . "${APP_DIR}/app.env"
-export SAFELANE_APP APP_DIR NAMESPACE ROLLOUT STABLE_SERVICE CANARY_SERVICE
+# Optional per-app data, defaulted so `set -u` cannot kill a stage that only
+# mentions it in a summary line.
+ANALYSIS_TEMPLATE="${ANALYSIS_TEMPLATE:-}"
+export SAFELANE_APP SAFELANE_ENVIRONMENT APP_DIR NAMESPACE ROLLOUT ANALYSIS_TEMPLATE
+export STABLE_SERVICE CANARY_SERVICE
 
 # resolve_digest <repo> <tag> -- the immutable digest for a GHCR tag.
 resolve_digest() {

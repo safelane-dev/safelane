@@ -13,8 +13,15 @@
 #   monitoring/prometheus    the analysis provider, 5s scrape, endpoint-role
 #                            discovery so the `service` label exists
 #   monitoring/grafana       the canary dashboard, anonymous read
-#   <app>/                   the demo app at a healthy baseline, plus the two
-#                            SafeLane identities and a load generator
+#   <app>/                   the demo app at a healthy baseline -- Rollout,
+#                            stable and canary Services, and the background
+#                            AnalysisTemplate the Rollout references -- plus a
+#                            load generator and the two SafeLane identities
+#
+# Nothing here reads SafeLane configuration. The application owns every one of
+# those objects, and both identity paths derive from SAFELANE_APP and
+# SAFELANE_ENVIRONMENT, so this runs on an empty cluster with SafeLane not yet
+# configured.
 #
 # The identity stage rewrites your default kubeconfig context so the agent runs
 # as a ServiceAccount that cannot patch rollouts. Your previous context is
@@ -39,31 +46,28 @@ require_admin() {
     echo "Switch to one (kubectl config use-context safelane-admin) and retry." >&2
     exit 1
   fi
-  echo "running as $(kubectl config current-context), app ${SAFELANE_APP}"
+  echo "running as $(kubectl config current-context), app ${SAFELANE_APP} in ${SAFELANE_ENVIRONMENT}"
 }
 
 require_admin
 
-stage "1/6  cluster, ingress, Argo Rollouts"
+stage "1/5  cluster, ingress, Argo Rollouts"
 bash "${HERE}/10-cluster.sh"
 
-stage "2/6  Prometheus and Grafana"
+stage "2/5  Prometheus and Grafana"
 bash "${HERE}/20-monitoring.sh"
 
-stage "3/6  ${SAFELANE_APP} baseline"
+stage "3/5  ${SAFELANE_APP} baseline"
 bash "${HERE}/30-baseline.sh"
 
-stage "4/6  load generator"
+stage "4/5  load generator"
 bash "${HERE}/40-loadgen.sh"
 
 # Last on purpose: this stage drops the default kubeconfig context to an
 # identity that may only read rollouts. Anything that still needs to create
 # objects has to run before it.
-stage "5/6  SafeLane identities"
+stage "5/5  SafeLane identities"
 bash "${HERE}/50-identities.sh"
-
-stage "6/6  analysis probe"
-bash "${HERE}/60-probe.sh"
 
 cat <<DONE
 
@@ -71,6 +75,7 @@ cat <<DONE
 
 Verify:
   kubectl --context safelane-admin get rollout ${ROLLOUT} -n ${NAMESPACE}
+  kubectl --context safelane-admin get analysistemplate ${ANALYSIS_TEMPLATE} -n ${NAMESPACE}
   kubectl auth can-i patch rollouts -n ${NAMESPACE}   # no
 
 Watch:
@@ -81,6 +86,7 @@ Watch:
 Between rehearsals:
   ./cluster/reset.sh
 
-Your default kubectl context is now safelane-caller, which can read rollouts
-and nothing else. For ordinary cluster work use --context safelane-admin.
+Your default kubectl context is now safelane-caller-${SAFELANE_APP}, which can
+read this application's Rollout, Services and AnalysisTemplate, and nothing
+else. For ordinary cluster work use --context safelane-admin.
 DONE

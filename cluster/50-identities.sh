@@ -1,10 +1,20 @@
 #!/usr/bin/env bash
-# Mirrors SafeLane's two production identities in the application namespace.
+# Mirrors SafeLane's two identities in the application namespace.
+#
+# Neither identity may create anything. The application package owns the
+# Rollout, both Services and the background AnalysisTemplate; SafeLane reads
+# them and patches two fields of the Rollout. The RBAC below is the boundary
+# that makes "SafeLane cannot take cluster ownership back" a property of
+# Kubernetes rather than a promise in a README.
+#
+# Both paths derive from SAFELANE_APP and SAFELANE_ENVIRONMENT. No SafeLane
+# configuration file is read, because this stage runs before SafeLane has been
+# configured at all.
 #
 # Safe to run twice: RBAC and token Secrets are declarative, the preserved
 # admin context is reused, and both generated ServiceAccount kubeconfigs are
 # replaced atomically. The caller becomes the default context; the controller
-# context is written only to project.yml's controller_kubeconfig path.
+# context is written only under the derived controller identity path.
 set -euo pipefail
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
@@ -18,26 +28,9 @@ CONTROLLER=safelane-controller
 ADMIN_CONTEXT=safelane-admin
 DEFAULT_KUBECONFIG="${HOME:?HOME is required}/.kube/config"
 SAFELANE_CONFIG_HOME="${SAFELANE_HOME:-${HOME}/.safelane}"
-PROJECT_FILE="${SAFELANE_PROJECT_FILE:-${SAFELANE_CONFIG_HOME}/apps/${SAFELANE_APP}/project.yml}"
-
-yaml_scalar() {
-  local key="$1"
-  awk -v key="${key}" '
-    $0 ~ "^[[:space:]]*" key ":[[:space:]]*" {
-      sub("^[[:space:]]*" key ":[[:space:]]*", "")
-      sub(/[[:space:]]*#.*/, "")
-      gsub(/^[[:space:]]+|[[:space:]]+$/, "")
-      quote = sprintf("%c", 39)
-      first = substr($0, 1, 1)
-      last = substr($0, length($0), 1)
-      if ((first == "\"" && last == "\"") || (first == quote && last == quote)) {
-        $0 = substr($0, 2, length($0) - 2)
-      }
-      print
-      exit
-    }
-  ' "${PROJECT_FILE}"
-}
+# The one derived location. SafeLane resolves the same path from the same two
+# names; nothing writes it into YAML and nothing reads it back out.
+CONTROLLER_KUBECONFIG="${SAFELANE_CONFIG_HOME}/apps/${SAFELANE_APP}/environments/${SAFELANE_ENVIRONMENT}/identities/controller/kubeconfig"
 
 context_exists() {
   kubectl --kubeconfig "${DEFAULT_KUBECONFIG}" config get-contexts -o name |
@@ -51,28 +44,6 @@ fi
 if [[ -L "${DEFAULT_KUBECONFIG}" ]]; then
   echo "Refusing to mutate symlinked kubeconfig ${DEFAULT_KUBECONFIG}." >&2
   exit 1
-fi
-if [[ ! -f "${PROJECT_FILE}" ]]; then
-  echo "Refusing to continue: project config not found at ${PROJECT_FILE}." >&2
-  exit 1
-fi
-
-CONTROLLER_KUBECONFIG_VALUE="$(yaml_scalar controller_kubeconfig)"
-CONTROLLER_CONTEXT="$(yaml_scalar controller_context)"
-if [[ -z "${CONTROLLER_KUBECONFIG_VALUE}" || -z "${CONTROLLER_CONTEXT}" ]]; then
-  echo "project.yml must set controller_kubeconfig and controller_context." >&2
-  exit 1
-fi
-if [[ "${CONTROLLER_CONTEXT}" != "${CONTROLLER}" ]]; then
-  echo "Refusing unexpected controller context ${CONTROLLER_CONTEXT}; want ${CONTROLLER}." >&2
-  exit 1
-fi
-
-PROJECT_DIR="$(cd "$(dirname "${PROJECT_FILE}")" && pwd -P)"
-if [[ "${CONTROLLER_KUBECONFIG_VALUE}" = /* ]]; then
-  CONTROLLER_KUBECONFIG="${CONTROLLER_KUBECONFIG_VALUE}"
-else
-  CONTROLLER_KUBECONFIG="${PROJECT_DIR}/${CONTROLLER_KUBECONFIG_VALUE}"
 fi
 mkdir -p "$(dirname "${CONTROLLER_KUBECONFIG}")"
 
@@ -140,9 +111,17 @@ metadata:
   name: ${CALLER}
   namespace: ${NAMESPACE}
 rules:
+  # Everything the caller does is discovery and status: find the Rollout, read
+  # which Services and background AnalysisTemplate it references, resolve them.
   - apiGroups: ["argoproj.io"]
     resources: ["rollouts"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list"]
+  - apiGroups: ["argoproj.io"]
+    resources: ["analysistemplates"]
+    verbs: ["get", "list"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -179,21 +158,24 @@ metadata:
   name: ${CONTROLLER}
   namespace: ${NAMESPACE}
 rules:
+  # One object, two verbs. resourceNames pins this to the Rollout the
+  # application package installed, so the privileged identity cannot touch a
+  # second Rollout that happens to share the namespace. The status subresource
+  # is what `kubectl argo rollouts promote|abort` writes; without it the
+  # natural controls fail at the boundary rather than at the decision.
   - apiGroups: ["argoproj.io"]
     resources: ["rollouts", "rollouts/status"]
+    resourceNames: ["${ROLLOUT}"]
     verbs: ["get", "patch"]
-  - apiGroups: [""]
-    resources: ["services"]
-    verbs: ["get", "create", "update", "patch"]
-  - apiGroups: ["argoproj.io"]
-    resources: ["analysistemplates"]
-    verbs: ["get", "create", "update", "patch"]
+  # Read-only, and the only thing here that is not the Rollout: the AnalysisRun
+  # names are chosen by Argo at run time, so they cannot be named in advance.
   - apiGroups: ["argoproj.io"]
     resources: ["analysisruns"]
     verbs: ["get"]
-  - apiGroups: ["networking.k8s.io"]
-    resources: ["ingresses"]
-    verbs: ["get", "create", "update", "patch"]
+  # No Services, AnalysisTemplates or Ingresses, and no create or update
+  # anywhere. The application owns those; SafeLane no longer renders them, so a
+  # regression that starts rendering them again fails here instead of silently
+  # taking ownership back.
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

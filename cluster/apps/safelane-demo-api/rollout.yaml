@@ -14,6 +14,15 @@ spec:
     canary:
       stableService: safelane-demo-api-stable
       canaryService: safelane-demo-api-canary
+      # Background analysis, by reference. Nothing inline: the AnalysisTemplate
+      # is a separate object this package owns, so SafeLane can read which
+      # analysis guards the release without being able to rewrite it.
+      analysis:
+        templates:
+          - templateName: success-rate
+        args:
+          - name: service-name
+            value: safelane-demo-api-canary
   template:
     metadata:
       labels:
@@ -21,10 +30,11 @@ spec:
     spec:
       containers:
       - name: api
+        # No injected build identity. The revision this image was built from is
+        # carried by the image itself, as immutable OCI metadata; an
+        # environment variable in a manifest is mutable and goes stale the
+        # moment the digest changes.
         image: ghcr.io/andrewmaged814/safelane-demo-api@${BASELINE_DIGEST}
-        env:
-        - name: GIT_SHA
-          value: 726662d2c396b54cfc047721a41bc67e77643924
         ports:
         - name: http
           containerPort: 8080

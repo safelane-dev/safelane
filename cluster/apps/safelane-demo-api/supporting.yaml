@@ -23,3 +23,47 @@ spec:
   - name: http
     port: 80
     targetPort: http
+---
+# The background health analysis, owned by the application.
+#
+# SafeLane does not create this, patch it, or generate one of its own. It reads
+# the Rollout, finds this reference, and watches whatever the AnalysisRuns
+# Argo starts from it decide. Change the query here and SafeLane simply
+# watches the new one.
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: success-rate
+  namespace: safelane-demo-api
+spec:
+  args:
+    # Supplied by the Rollout, so the query follows whichever Service Argo is
+    # currently pointing at the canary pods.
+    - name: service-name
+  metrics:
+    - name: success-rate
+      # No `count` on purpose: this is a BACKGROUND analysis and must keep
+      # measuring for the whole rollout. With a fixed count it finishes early,
+      # while the canary is still new, and every later weight then rolls out
+      # completely unanalysed.
+      interval: 30s
+      # A full rate-window clear of the canary Service's endpoint flip. The
+      # Service only selects the canary pod once it is Ready, so a window
+      # straddling that moment still contains stable traffic recorded under the
+      # canary Service label, which reads as healthy no matter how broken the
+      # canary is.
+      initialDelay: 60s
+      # `len(result) > 0` first: an empty result means the canary served no
+      # measurable traffic, and that is a failed reading, not a vacuous pass.
+      successCondition: len(result) > 0 && result[0] >= 0.99
+      failureLimit: 1
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          # 30s window, matching the interval: short enough that a canary which
+          # starts failing is caught within one measurement rather than being
+          # averaged away against minutes of healthy traffic.
+          query: >-
+            sum(rate(http_requests_total{namespace="safelane-demo-api",service="{{args.service-name}}",status!~"5.."}[30s]))
+            /
+            sum(rate(http_requests_total{namespace="safelane-demo-api",service="{{args.service-name}}"}[30s]))
