@@ -513,17 +513,15 @@ func checkAgentTrace(t *testing.T, frozen delta.ReleaseDelta, turn agentAssessme
 		}
 		readFiles = append(readFiles, file)
 	}
-	position := 0
 	expectedReads := append([]string{"snapshot"}, delta.ViewNames...)
-	for _, view := range expectedReads {
-		for position < len(readFiles) && readFiles[position] != view+".txt" {
-			position++
+	if len(readFiles) < len(expectedReads) {
+		t.Errorf("tool trace did not contain all mandatory reads: %v", turn.ToolTrace)
+	} else {
+		for index, view := range expectedReads {
+			if readFiles[index] != view+".txt" {
+				t.Errorf("mandatory read %d was %q, want %q: %v", index+1, readFiles[index], view+".txt", turn.ToolTrace)
+			}
 		}
-		if position == len(readFiles) {
-			t.Errorf("tool trace did not show %s being read: %v", view, turn.ToolTrace)
-			continue
-		}
-		position++
 	}
 	known := map[string]bool{}
 	actual := map[string]bool{}
@@ -581,6 +579,13 @@ func controlledEvidenceFile(read, evidenceDir string, allowed map[string]bool) (
 	// read with one argument; no chaining, substitutions, comments, or extra
 	// paths can fit this grammar.
 	marker := strings.Index(lower, " -command ")
+	prefix := strings.TrimSpace(read[:marker])
+	if len(prefix) >= 2 && prefix[0] == '"' && prefix[len(prefix)-1] == '"' {
+		prefix = prefix[1 : len(prefix)-1]
+	}
+	if strings.ContainsAny(prefix, `"';&|`) || !strings.EqualFold(filepath.Base(prefix), "pwsh.exe") {
+		return "", false
+	}
 	payload := strings.TrimSpace(read[marker+len(" -command "):])
 	if len(payload) >= 2 && payload[0] == '"' && payload[len(payload)-1] == '"' {
 		payload = payload[1 : len(payload)-1]
@@ -616,6 +621,7 @@ func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 		"pwsh.exe -Command \"Get-Content -LiteralPath .\\changes.txt`nGet-Content C:\\Windows\\win.ini\"",
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt # allowed"`,
 		`pwsh.exe -Command "Get-Content -LiteralPath $(Get-ChildItem)"`,
+		`whoami; pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
 		`git diff -- changes.txt`,
 		`pwsh.exe -Command "Get-Content .\unknown.json"`,
 	} {
