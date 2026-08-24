@@ -45,7 +45,7 @@ try {
     $ready = $false
     foreach ($attempt in 1..50) {
         try {
-            Invoke-WebRequest -Uri "http://127.0.0.1:$port/$version/checksums.txt" | Out-Null
+            Invoke-WebRequest -UseBasicParsing -Uri "http://127.0.0.1:$port/$version/checksums.txt" | Out-Null
             $ready = $true
             break
         } catch {
