@@ -1,3 +1,15 @@
+// Package release is SafeLane's rejection vocabulary.
+//
+// One error type, eight categories, and a rule: a rejection says what is
+// wrong, where, and what to change. The Remedy field is the whole reason this
+// exists rather than fmt.Errorf - an agent reading a failure needs to know what
+// to do next, and prose it has to interpret is prose it will interpret wrongly.
+//
+// The categories are branchable so a caller can tell an operational failure
+// from a caller's mistake without parsing text. [CategoryEvidenceUnknown] in
+// particular is not a convenience: "GitHub was unreachable" and "the check
+// failed" lead to different actions, and collapsing them would make one of
+// them stop a release for a reason that is not true.
 package release
 
 import (

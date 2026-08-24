@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-func TestAssertBoundaryUsesEachConfiguredIdentityAndRecordsCapability(t *testing.T) {
+func TestAssertCapabilitiesUsesEachConfiguredIdentity(t *testing.T) {
 	var calls [][]string
 	e := New(Config{Namespace: "safelane-demo-api", ControllerKubeconfig: "controller.kubeconfig", ControllerContext: "controller"})
 	e.Now = func() time.Time { return time.Date(2026, 8, 20, 14, 26, 0, 0, time.UTC) }
@@ -32,12 +32,17 @@ func TestAssertBoundaryUsesEachConfiguredIdentityAndRecordsCapability(t *testing
 			return nil, nil
 		}
 	}
-	b, err := e.AssertBoundary(context.Background(), "system:serviceaccount:safelane-demo-api:safelane-controller", "system:serviceaccount:safelane-demo-api:safelane-caller")
+	capabilities, err := e.AssertCapabilities(context.Background(),
+		"system:serviceaccount:safelane-demo-api:safelane-controller",
+		"system:serviceaccount:safelane-demo-api:safelane-caller")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !b.CallerCapability.GetRollouts || b.CallerCapability.PatchRollouts {
-		t.Fatalf("capability = %+v", b.CallerCapability)
+	// The caller can read the Rollout and cannot patch it. That denial is
+	// enforced by Kubernetes, not by SafeLane, and it holds even if SafeLane
+	// is bypassed entirely.
+	if !capabilities.CallerGetRollouts || capabilities.CallerPatchRollouts {
+		t.Fatalf("capabilities = %+v", capabilities)
 	}
 	wantCallerGet := []string{"auth", "can-i", "get", "rollouts.argoproj.io", "--namespace", "safelane-demo-api"}
 	if !reflect.DeepEqual(calls[3], wantCallerGet) {

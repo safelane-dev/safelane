@@ -1,8 +1,0 @@
-
-Promoting 50 → 100…
-Argo Rollouts: AnalysisRun safelane-demo-api-success-rate-2 → Successful (3/3 measurements)
-                 request-success-rate  measured 1.00, condition >= 0.99
-Argo Rollouts: Healthy. The canary is now the stable version.
-
-Release complete.  lane fast, 1 gate, 2 granted transitions, 0 refusals.
-Release Proof: safelane release proof rel_01M0F2K7RXQW3HDN8YT4B1MPZE

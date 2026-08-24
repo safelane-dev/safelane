@@ -1,4 +1,0 @@
-safelane release run: rejected:
-  - [policy] release_not_eligible
-      eligibility is ineligible (required_check_failed)
-      no lane and no envelope were attached; no rollout may start

@@ -1,7 +1,0 @@
-safelane release: rejected:
-  - [schema] unknown_field (risk)
-      a Release Request carries no risk claims
-      remedy: send repository and pull_request only
-  - [schema] unknown_field (lane)
-      the lane is selected by assessment, never requested
-      remedy: send repository and pull_request only

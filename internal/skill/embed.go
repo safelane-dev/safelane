@@ -1,4 +1,8 @@
-// Package skill contains the agent skill installed by `safelane setup`.
+// Package skill carries the agent skill SafeLane installs.
+//
+// It is one embedded source so every installed copy is byte-identical: a skill
+// that drifted per harness would mean two agents driving the same tool from
+// different instructions.
 package skill
 
 import _ "embed"

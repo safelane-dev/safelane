@@ -40,30 +40,13 @@ func (f *fakeRunner) enqueue(out string, err error) {
 	f.errs = append(f.errs, err)
 }
 
-func testBundle(t *testing.T) release.RenderedBundle {
-	t.Helper()
-	svc, err := release.NewRenderedResource(release.ResourceRef{
-		TemplatePath: "10-service.yaml.tmpl", APIVersion: "v1", Kind: "Service", Namespace: "safelane-demo-api", Name: "safelane-demo-api-stable",
-	}, []byte("apiVersion: v1\nkind: Service\nmetadata:\n  name: safelane-demo-api-stable\n  namespace: safelane-demo-api\n"))
-	if err != nil {
-		t.Fatalf("test setup: %v", err)
-	}
-	rollout, err := release.NewRenderedResource(release.ResourceRef{
-		TemplatePath: "40-rollout.yaml.tmpl", APIVersion: "argoproj.io/v1alpha1", Kind: "Rollout", Namespace: "safelane-demo-api", Name: "safelane-demo-api",
-	}, []byte("apiVersion: argoproj.io/v1alpha1\nkind: Rollout\nmetadata:\n  name: safelane-demo-api\n  namespace: safelane-demo-api\n"+
-		"# sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8\n"))
-	if err != nil {
-		t.Fatalf("test setup: %v", err)
-	}
-	tmpl := release.TemplateIdentity{Name: "safelane-demo-api-canary", Version: "v0.1.0-fixture", ContentDigest: "sha256:" + strings.Repeat("a1", 32), FileCount: 5}
-	target := release.Target{Application: "safelane-demo-api", Environment: "production", Cluster: "safelane-demo", Namespace: "safelane-demo-api"}
-	digest := "sha256:3fbc1d9a7e42c8056d1f9b3e7a5c204d8e6b1f39a7c50d28e4b6f19a3c7d50e8"
-	bundle, err := release.NewRenderedBundle(tmpl, target, digest, []release.RenderedResource{svc, rollout})
-	if err != nil {
-		t.Fatalf("test setup: %v", err)
-	}
-	return bundle
-}
+// testPatch is the shape releasepatch produces: two tests and two replaces.
+var testPatch = []byte(`[` +
+	`{"op":"test","path":"/metadata/resourceVersion","value":"84213"},` +
+	`{"op":"test","path":"/spec/template/spec/containers/0/image","value":"ghcr.io/o/i@sha256:old"},` +
+	`{"op":"replace","path":"/spec/template/spec/containers/0/image","value":"ghcr.io/o/i@sha256:new"},` +
+	`{"op":"replace","path":"/spec/strategy/canary/steps","value":[{"setWeight":50},{"pause":{}}]}` +
+	`]`)
 
 func newTestExecutor(fr *fakeRunner) *execute.Executor {
 	ex := execute.New(execute.Config{Namespace: "safelane-demo-api", Rollout: "safelane-demo-api"})
@@ -72,33 +55,12 @@ func newTestExecutor(fr *fakeRunner) *execute.Executor {
 	return ex
 }
 
-func TestApply_ReportsOneRowPerResourceInBundleOrder(t *testing.T) {
-	fr := &fakeRunner{}
-	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api configured\n", nil)
-	ex := newTestExecutor(fr)
-	bundle := testBundle(t)
-
-	rows, err := ex.Apply(context.Background(), bundle)
-	if err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if len(rows) != 2 {
-		t.Fatalf("got %d rows, want 2", len(rows))
-	}
-	if rows[0].Ref.Kind != "Service" || rows[0].Verb != "unchanged" {
-		t.Errorf("row 0 = %+v, want Service/unchanged", rows[0])
-	}
-	if rows[1].Ref.Kind != "Rollout" || rows[1].Verb != "configured" {
-		t.Errorf("row 1 = %+v, want Rollout/configured", rows[1])
-	}
-}
-
 func TestReleaseAnnotationAndArgoRetryUseNarrowExactCommands(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue("annotated\n", nil)
 	fr.enqueue("retried\n", nil)
 	ex := newTestExecutor(fr)
-	id := release.ReleaseID("rel_01ARZ3NDEKTSV4RRFFQ69G5FAV")
+	id := "rel_01ARZ3NDEKTSV4RRFFQ69G5FAV"
 	if err := ex.AnnotateRelease(context.Background(), id); err != nil {
 		t.Fatal(err)
 	}
@@ -114,50 +76,6 @@ func TestReleaseAnnotationAndArgoRetryUseNarrowExactCommands(t *testing.T) {
 	}
 }
 
-func TestApply_SendsTheExactBundleBytesOnStdin(t *testing.T) {
-	fr := &fakeRunner{}
-	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
-	ex := newTestExecutor(fr)
-	bundle := testBundle(t)
-
-	if _, err := ex.Apply(context.Background(), bundle); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if len(fr.stdins) != 1 {
-		t.Fatalf("want exactly one apply call, got %d", len(fr.stdins))
-	}
-	if string(fr.stdins[0]) != string(bundle.Manifest()) {
-		t.Error("Apply did not send the exact bundle bytes on stdin -- it must never re-render")
-	}
-}
-
-func TestApply_IsOneCallOverTheWholeBundle(t *testing.T) {
-	fr := &fakeRunner{}
-	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
-	ex := newTestExecutor(fr)
-
-	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
-		t.Fatalf("Apply: %v", err)
-	}
-	if len(fr.calls) != 1 {
-		t.Fatalf("want exactly 1 kubectl call, got %d: %v", len(fr.calls), fr.calls)
-	}
-	args := strings.Join(fr.calls[0], " ")
-	if !strings.Contains(args, "apply") || !strings.Contains(args, "-f -") && !strings.Contains(args, "-f") {
-		t.Errorf("apply args = %v, want an `apply -f -` invocation", fr.calls[0])
-	}
-}
-
-func TestApply_MismatchedLineCountIsAnError(t *testing.T) {
-	fr := &fakeRunner{}
-	fr.enqueue("service/safelane-demo-api-stable unchanged\n", nil) // one line for two resources
-	ex := newTestExecutor(fr)
-
-	if _, err := ex.Apply(context.Background(), testBundle(t)); err == nil {
-		t.Fatal("want an error when kubectl reports a different number of lines than resources")
-	}
-}
-
 func TestPrivilegedFlags_ThreadedOnlyWhenConfigured(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
@@ -167,12 +85,12 @@ func TestPrivilegedFlags_ThreadedOnlyWhenConfigured(t *testing.T) {
 	})
 	ex.Run = fr.run
 
-	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
-		t.Fatalf("Apply: %v", err)
+	if err := ex.ApplyPatch(context.Background(), testPatch); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
 	}
 	args := strings.Join(fr.calls[0], " ")
 	if !strings.Contains(args, "--kubeconfig controller.kubeconfig") || !strings.Contains(args, "--context safelane-controller") {
-		t.Errorf("privileged apply args = %v, want the controller kubeconfig/context threaded through", fr.calls[0])
+		t.Errorf("privileged patch args = %v, want the controller kubeconfig/context threaded through", fr.calls[0])
 	}
 }
 
@@ -181,12 +99,12 @@ func TestPrivilegedFlags_AbsentWhenNotConfigured(t *testing.T) {
 	fr.enqueue("service/safelane-demo-api-stable unchanged\nrollout.argoproj.io/safelane-demo-api unchanged\n", nil)
 	ex := newTestExecutor(fr)
 
-	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
-		t.Fatalf("Apply: %v", err)
+	if err := ex.ApplyPatch(context.Background(), testPatch); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
 	}
 	for _, a := range fr.calls[0] {
 		if a == "--kubeconfig" || a == "--context" {
-			t.Errorf("apply args = %v, want no controller flags when none are configured", fr.calls[0])
+			t.Errorf("patch args = %v, want no controller flags when none are configured", fr.calls[0])
 		}
 	}
 }
@@ -219,8 +137,8 @@ func TestArguments_NeverContainFull(t *testing.T) {
 	fr.enqueue("rollout.argoproj.io/safelane-demo-api promoted\n", nil)
 	ex := newTestExecutor(fr)
 
-	if _, err := ex.Apply(context.Background(), testBundle(t)); err != nil {
-		t.Fatalf("Apply: %v", err)
+	if err := ex.ApplyPatch(context.Background(), testPatch); err != nil {
+		t.Fatalf("ApplyPatch: %v", err)
 	}
 	if _, err := ex.GetStatus(context.Background()); err != nil {
 		t.Fatalf("GetStatus: %v", err)
@@ -273,7 +191,7 @@ func TestClassifyRunError_MissingBinaryIsHumanReadable(t *testing.T) {
 	fr.enqueue("", &exec.Error{Name: "kubectl", Err: exec.ErrNotFound})
 	ex := newTestExecutor(fr)
 
-	_, err := ex.Apply(context.Background(), testBundle(t))
+	err := ex.ApplyPatch(context.Background(), testPatch)
 	if err == nil {
 		t.Fatal("want an error when kubectl is missing")
 	}
@@ -284,9 +202,6 @@ func TestClassifyRunError_MissingBinaryIsHumanReadable(t *testing.T) {
 	if rerr.Code != "kubectl_missing" {
 		t.Errorf("code = %q, want kubectl_missing", rerr.Code)
 	}
-	if rerr.Tag() != release.TagExecute {
-		t.Errorf("tag = %q, want %q", rerr.Tag(), release.TagExecute)
-	}
 }
 
 func TestClassifyRunError_OtherFailureIsClusterUnreachable(t *testing.T) {
@@ -294,7 +209,7 @@ func TestClassifyRunError_OtherFailureIsClusterUnreachable(t *testing.T) {
 	fr.enqueue("", errors.New("dial tcp: connection refused"))
 	ex := newTestExecutor(fr)
 
-	_, err := ex.Apply(context.Background(), testBundle(t))
+	err := ex.ApplyPatch(context.Background(), testPatch)
 	var rerr *release.Error
 	if !errors.As(err, &rerr) {
 		t.Fatalf("error = %v (%T), want a *release.Error", err, err)

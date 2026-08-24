@@ -1,3 +1,0 @@
-  ✗ cluster                safelane-demo: dial tcp 10.0.0.12:6443: i/o timeout
-      remedy: check the kubeconfig context and the cluster state
-  – rollout                skipped (cluster unreachable)

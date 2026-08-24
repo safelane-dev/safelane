@@ -1,4 +1,0 @@
-2 open releases
-
-  rel_<ID>  safelane-demo-api/production  guarded   at_gate  weight 25  stalled 41m
-  rel_<ID>  safelane-demo-api/staging  fast      at_gate  weight 50  stalled 3h12m

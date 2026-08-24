@@ -1,5 +1,0 @@
-# SafeLane Release Template metadata.
-# Recognized keys: name, version. Both optional; the template's content digest is
-# what a Release actually pins.
-name: safelane-demo-api-canary
-version: v0.1.0-fixture

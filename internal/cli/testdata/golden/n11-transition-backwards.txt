@@ -1,4 +1,0 @@
-safelane release run: rejected:
-  - [policy] transition_not_permitted (to)
-      weight 25 is behind the current weight 50
-      the envelope moves forward only; use abort to withdraw

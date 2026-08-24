@@ -1,0 +1,44 @@
+{
+  "name": "a migration with no production-sized test evidence",
+  "why": "The case the whole assessment boundary exists for. The change is eligible - it built, it passed, the container traces to the commit - and it is still not a good idea to ship yet. Waiting names the consequence, what could not be confirmed, and what the configured analysis would not catch.",
+  "world": "migration",
+  "expect": {
+    "eligible": true,
+    "action": "wait",
+    "no_lane": true,
+    "names_a_next_step": true,
+    "approvable": false
+  },
+  "assessment": {
+    "snapshot": "",
+    "observations": [
+      {
+        "statement": "The change alters how the service writes to its database, and the migration runs during start-up of the new version.",
+        "evidence": ["changes"]
+      }
+    ],
+    "hazards": [
+      {
+        "name": "partial schema migration",
+        "evidence": ["changes"],
+        "preconditions": [
+          "the migration runs during start-up of the new version",
+          "it fails part-way through"
+        ],
+        "consequence": "The stable version cannot read the rows that were already migrated, so rolling back does not restore service.",
+        "coverage": {
+          "status": "not_covered",
+          "evidence": ["health"],
+          "explanation": "The configured analysis measures request success rate. A migration that completes but leaves rows unreadable would not appear there."
+        }
+      }
+    ],
+    "risk": "high",
+    "action": "wait",
+    "rationale": "The migration's blast radius is not bounded by the configured analysis.",
+    "concern": "This change alters how the service writes to its database, and the migration runs during start-up of the new version. If it fails part-way, the stable version cannot read the rows that were already migrated.",
+    "unconfirmed": "Whether the migration has been run against production-sized data.",
+    "analysis_blindspot": "Your configured analysis measures request success rate. A migration that completes but leaves rows unreadable would not appear there.",
+    "next_step": "Run the migration as a separate job before this release, or tell me it already ran and I will reassess."
+  }
+}

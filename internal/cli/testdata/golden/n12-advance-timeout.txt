@@ -1,7 +1,0 @@
-Promoting 50 → 75…
-Argo Rollouts: Progressing → weight 75
-timeout after 180s waiting for gate 3
-
-The promotion was sent. The outcome is unknown.
-Run: safelane release status rel_01M0F3QD9NBV6JKC2WS8XA7TR4
-Reconnect with safelane release run; it will reconcile before acting.

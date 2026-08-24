@@ -1,0 +1,12 @@
+{
+  "name": "a failed candidate build is ineligible, not risky",
+  "why": "The one confusion this design most needs to avoid. A failed build is not a high-risk release that should go slowly; it is a release that does not go. The gate stops it before any judgement about risk, and the reason is stated in eligibility language.",
+  "world": "failed-build",
+  "expect": {
+    "eligible": false,
+    "blocker": "required_check_failed",
+    "no_risk_language": true,
+    "approvable": false
+  },
+  "assessment": null
+}

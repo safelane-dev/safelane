@@ -1,4 +1,30 @@
-// Command safelane coordinates evidence-shaped releases through Argo Rollouts.
+// Command safelane coordinates a merged change through Argo Rollouts.
+//
+// The command surface is decision 11's, and it is short on purpose:
+//
+//	safelane discover <namespace>
+//	safelane register <selection-json-path|->
+//	safelane inspect <env> [<revision>]
+//	safelane recommend <env> <assessment-json-path|->
+//	safelane run <env>
+//	safelane status <env>
+//	safelane hold <env> <reason>
+//	safelane continue <env> <reason>
+//	safelane stop <env> <reason>
+//	safelane proof <env> [--details]
+//
+// There is no `release` prefix, because SafeLane is a release tool and the
+// noun is implied. There is no `--json` on the agent path: output is JSON when
+// stdout is not a terminal and readable text when it is, so the same command
+// serves a script and a person. There is no `--yes`, because a flag the caller
+// passes every time is not a safety mechanism - at a terminal `run` asks, and
+// piped, the frozen recommendation is the authorization.
+//
+// The Environment is always the positional argument, because it is the one
+// thing the user actually says. No command takes a release identifier: there
+// is one active release per Application and Environment, and a person who has
+// to look up an identifier to stop a rollout is a person who will not stop it
+// in time.
 package main
 
 import (
@@ -7,13 +33,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/discovery"
-	"github.com/AndrewMaged814/safelane/internal/project"
 	githubverify "github.com/AndrewMaged814/safelane/internal/verify/github"
 	"github.com/AndrewMaged814/safelane/internal/verify/oci"
 	"github.com/spf13/cobra"
@@ -29,12 +53,10 @@ type exitError struct{ code int }
 func (e exitError) Error() string { return fmt.Sprintf("exit %d", e.code) }
 
 type commandRuntime struct {
-	root     string
-	app      string
-	stdout   io.Writer
-	stderr   io.Writer
-	storeDir string
-	project  string
+	root   string
+	app    string
+	stdout io.Writer
+	stderr io.Writer
 }
 
 func main() { os.Exit(run(os.Args[1:], os.Stdout, os.Stderr)) }
@@ -45,10 +67,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "safelane: %v\n", err)
 		return cli.ExitUsage
 	}
-	rt := resolveCommandRuntime(".", app, stdout, stderr)
-	restoreCaller := activateDemoCaller(rt.project)
-	defer restoreCaller()
-	root := newRootCommand(rt)
+	root := newRootCommand(commandRuntime{root: ".", app: app, stdout: stdout, stderr: stderr})
 	root.SetArgs(args)
 	if err := root.Execute(); err != nil {
 		var coded exitError
@@ -61,46 +80,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 	return cli.ExitOK
 }
 
-func activateDemoCaller(projectFile string) func() {
-	if projectFile == "" {
-		return func() {}
-	}
-	cfg, err := project.Load(projectFile)
-	if err != nil || cfg.Application != "safelane-demo-api" {
-		return func() {}
-	}
-	caller := filepath.Join(filepath.Dir(projectFile), "caller.kubeconfig")
-	if _, err := os.Stat(caller); err != nil {
-		return func() {}
-	}
-	previous, existed := os.LookupEnv("KUBECONFIG")
-	_ = os.Setenv("KUBECONFIG", caller)
-	return func() {
-		if existed {
-			_ = os.Setenv("KUBECONFIG", previous)
-		} else {
-			_ = os.Unsetenv("KUBECONFIG")
-		}
-	}
-}
-
-func resolveCommandRuntime(root, app string, stdout, stderr io.Writer) commandRuntime {
-	rt := commandRuntime{root: root, app: app, stdout: stdout, stderr: stderr}
-	if app != "" {
-		if home, err := project.Home(); err == nil {
-			loc := project.ForApp(home, app)
-			rt.storeDir, rt.project = loc.ReleasesDir, loc.ProjectFile
-		}
-		return rt
-	}
-	if loc, err := project.Resolve(root); err == nil {
-		rt.storeDir, rt.project = loc.ReleasesDir, loc.ProjectFile
-	} else if home, homeErr := project.Home(); homeErr == nil {
-		rt.storeDir = filepath.Join(home, "apps", ".unmatched", "releases")
-	}
-	return rt
-}
-
+// extractGlobalApp pulls `--app` out before cobra sees it, so it works the
+// same in front of every command.
+//
+// It is the only flag that identifies anything, and it exists for exactly one
+// case: a checkout registered as more than one Application. Its absence is
+// never an error when the inference is unique.
 func extractGlobalApp(args []string) (string, []string, error) {
 	clean := make([]string, 0, len(args))
 	app := ""
@@ -118,17 +103,14 @@ func extractGlobalApp(args []string) (string, []string, error) {
 			clean = append(clean, a)
 		}
 	}
-	if app != "" && project.SanitizeApplication(app) != app {
-		return "", nil, fmt.Errorf("--app %q must be a lowercase DNS label", app)
-	}
 	return app, clean, nil
 }
 
 func newRootCommand(rt commandRuntime) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "safelane",
-		Short:         "Risk-shaped release coordination for coding agents",
-		Long:          "SafeLane turns code evidence into a bounded rollout and coordinates Argo through promotion or rollback.",
+		Short:         "Release coordination for coding agents",
+		Long:          "SafeLane reads what changed, recommends how far to release it, and coordinates Argo Rollouts through promotion or rollback.",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
@@ -136,22 +118,141 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	}
 	root.SetOut(rt.stdout)
 	root.SetErr(rt.stderr)
-	root.PersistentFlags().String("app", rt.app, "select an application outside its repository")
-	root.AddCommand(setupGroup(rt), legacyLeaf(rt, "doctor [--json]", "Check whether SafeLane can release right now", cli.DoctorCommand(rt.root), injectProject))
-	root.AddCommand(releaseGroup(rt), completionCommand(root), versionCommand())
-	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectReleaseCommand(rt),
-		recommendCommand(rt), runReleaseCommand(rt))
+	root.PersistentFlags().String("app", rt.app, "name the application when this repository is registered as more than one")
+
+	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectCommand(rt),
+		recommendCommand(rt), runCommand(rt))
 	root.AddCommand(naturalControls(rt)...)
+	root.AddCommand(completionCommand(root), versionCommand())
 	return root
 }
 
+// readers builds the three production ports. They are values on the options
+// struct rather than globals, so a test substitutes any of them without a
+// build tag.
+func (rt commandRuntime) readers(environment, revision string, forceJSON bool) cli.InspectOptions {
+	home, _ := config.Home()
+	return cli.InspectOptions{
+		Root:        rt.root,
+		Home:        home,
+		Environment: environment,
+		Revision:    revision,
+		App:         rt.app,
+		ForceJSON:   forceJSON,
+		Cluster:     discovery.Service{},
+		Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
+		Registry:    oci.Resolver{Registry: oci.Remote{}},
+	}
+}
+
+func jsonFlag(cmd *cobra.Command) bool {
+	forceJSON, _ := cmd.Flags().GetBool("json")
+	return forceJSON
+}
+
+func withJSON(cmd *cobra.Command) *cobra.Command {
+	cmd.Flags().Bool("json", false, "force machine output at a terminal")
+	return cmd
+}
+
+func discoverCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "discover <namespace>",
+		Short: "Read one namespace and report what SafeLane could release",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return exit(cli.Discover(cmd.Context(), cli.DiscoverOptions{
+				Root:      rt.root,
+				Namespace: args[0],
+				ForceJSON: jsonFlag(cmd),
+				Service:   discovery.Service{},
+			}, rt.stdout, rt.stderr))
+		},
+	})
+}
+
+func registerCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "register <selection-json-path|->",
+		Short: "Confirm a discovered selection and write the configuration",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			return exit(cli.Register(cmd.Context(), cli.RegisterOptions{
+				Root:          rt.root,
+				Home:          home,
+				SelectionPath: args[0],
+				App:           rt.app,
+				ForceJSON:     jsonFlag(cmd),
+				Service:       discovery.Service{},
+				Stdin:         os.Stdin,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+}
+
+// inspectCommand freezes the evidence boundary for one release.
+//
+// The revision is a second optional positional rather than a flag:
+// `safelane inspect production a1b2c3d` releases that exact commit, and
+// because it is validated against the registered repository's default-branch
+// history, a bare value cannot be mistaken for anything else.
+func inspectCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "inspect <env> [<revision>]",
+		Short: "Freeze the evidence for a release and show what it is",
+		Args:  cobra.RangeArgs(1, 2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			revision := ""
+			if len(args) > 1 {
+				revision = args[1]
+			}
+			return exit(cli.Inspect(cmd.Context(),
+				rt.readers(args[0], revision, jsonFlag(cmd)), rt.stdout, rt.stderr))
+		},
+	})
+}
+
+// recommendCommand validates the active session's assessment. SafeLane
+// produces no assessment of its own; this is where somebody else's arrives and
+// gets checked for grounding.
+func recommendCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "recommend <env> <assessment-json-path|->",
+		Short: "Validate an assessment and give the recommendation",
+		Args:  cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return exit(cli.Recommend(cmd.Context(), cli.RecommendOptions{
+				Inspect:        rt.readers(args[0], "", jsonFlag(cmd)),
+				AssessmentPath: args[1],
+				Stdin:          os.Stdin,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+}
+
+func runCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "run <env>",
+		Short: "Release the recommendation awaiting your approval",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return exit(cli.Run(cmd.Context(), cli.RunOptions{
+				Inspect: rt.readers(args[0], "", jsonFlag(cmd)),
+				Confirm: os.Stdin,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+}
+
 // naturalControls are the five commands that address a release in progress.
-// None takes an identifier: there is one active release per Application and
-// Environment, so the pair resolves it. A person who has to look up an
-// identifier to stop a rollout is a person who will not stop it in time.
+// The reason on hold, continue and stop is positional text, because a control
+// with no recorded reason is not useful in proof.
 func naturalControls(rt commandRuntime) []*cobra.Command {
-	controls := func(cmd *cobra.Command, args []string) cli.ControlOptions {
-		forceJSON, _ := cmd.Flags().GetBool("json")
+	options := func(cmd *cobra.Command, args []string) cli.ControlOptions {
 		details, _ := cmd.Flags().GetBool("details")
 		home, _ := config.Home()
 		reason := ""
@@ -160,30 +261,27 @@ func naturalControls(rt commandRuntime) []*cobra.Command {
 		}
 		return cli.ControlOptions{
 			Root: rt.root, Home: home, Environment: args[0],
-			App: rt.app, ForceJSON: forceJSON, Reason: reason, Details: details,
+			App: rt.app, ForceJSON: jsonFlag(cmd), Reason: reason, Details: details,
 		}
 	}
-	leaf := func(use, short string, args cobra.PositionalArgs,
-		run func(context.Context, cli.ControlOptions, io.Writer, io.Writer) int) *cobra.Command {
+	leaf := func(use, short string, positional cobra.PositionalArgs,
+		invoke func(context.Context, cli.ControlOptions, io.Writer, io.Writer) int) *cobra.Command {
 
-		cmd := &cobra.Command{
-			Use: use, Short: short, Args: args,
-			RunE: func(cmd *cobra.Command, argv []string) error {
-				if code := run(cmd.Context(), controls(cmd, argv), rt.stdout, rt.stderr); code != cli.ExitOK {
-					return exitError{code: code}
-				}
-				return nil
+		return withJSON(&cobra.Command{
+			Use: use, Short: short, Args: positional,
+			RunE: func(cmd *cobra.Command, args []string) error {
+				return exit(invoke(cmd.Context(), options(cmd, args), rt.stdout, rt.stderr))
 			},
-		}
-		cmd.Flags().Bool("json", false, "force machine output at a terminal")
-		return cmd
+		})
 	}
 
-	proof := leaf("proof <env> [--details]", "Show what happened", cobra.ExactArgs(1), cli.Proof)
+	proof := leaf("proof <env>", "Show what happened", cobra.ExactArgs(1), cli.Proof)
+	// --details stays opt-in: loading full proof by default would spend an
+	// agent's context on records nobody asked for.
 	proof.Flags().Bool("details", false, "open the full record for this release")
 
 	return []*cobra.Command{
-		leaf("status [<env>]", "Say where the release is and what it is waiting for", cobra.ExactArgs(1), cli.Status),
+		leaf("status <env>", "Say where the release is and what it is waiting for", cobra.ExactArgs(1), cli.Status),
 		leaf("hold <env> <reason>", "Hold the rollout where it is", cobra.MinimumNArgs(2), cli.Hold),
 		leaf("continue <env> <reason>", "Continue a held rollout", cobra.MinimumNArgs(2), cli.Continue),
 		leaf("stop <env> <reason>", "Stop the rollout and restore the stable version", cobra.MinimumNArgs(2), cli.Stop),
@@ -191,246 +289,11 @@ func naturalControls(rt commandRuntime) []*cobra.Command {
 	}
 }
 
-// runReleaseCommand releases what is awaiting approval. There is no --yes: at a
-// terminal it asks, and piped the frozen recommendation is the authorization.
-func runReleaseCommand(rt commandRuntime) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "run <env>",
-		Short: "Release the recommendation awaiting your approval",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			forceJSON, _ := cmd.Flags().GetBool("json")
-			home, err := config.Home()
-			if err != nil {
-				return err
-			}
-			code := cli.Run(cmd.Context(), cli.RunOptions{
-				Inspect: cli.InspectOptions{
-					Root:        rt.root,
-					Home:        home,
-					Environment: args[0],
-					App:         rt.app,
-					ForceJSON:   forceJSON,
-					Cluster:     discovery.Service{},
-					Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
-					Registry:    oci.Resolver{Registry: oci.Remote{}},
-				},
-				Confirm: os.Stdin,
-			}, rt.stdout, rt.stderr)
-			if code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
+func exit(code int) error {
+	if code != cli.ExitOK {
+		return exitError{code: code}
 	}
-	cmd.Flags().Bool("json", false, "force machine output at a terminal")
-	return cmd
-}
-
-// recommendCommand validates the active session's assessment against the frozen
-// evidence and prints the recommendation. SafeLane produces no assessment of
-// its own; this is where somebody else's arrives and gets checked.
-func recommendCommand(rt commandRuntime) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "recommend <env> <assessment-json-path|->",
-		Short: "Validate an assessment and give the recommendation",
-		Args:  cobra.ExactArgs(2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			forceJSON, _ := cmd.Flags().GetBool("json")
-			home, err := config.Home()
-			if err != nil {
-				return err
-			}
-			code := cli.Recommend(cmd.Context(), cli.RecommendOptions{
-				Inspect: cli.InspectOptions{
-					Root:        rt.root,
-					Home:        home,
-					Environment: args[0],
-					App:         rt.app,
-					ForceJSON:   forceJSON,
-					Cluster:     discovery.Service{},
-					Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
-					Registry:    oci.Resolver{Registry: oci.Remote{}},
-				},
-				AssessmentPath: args[1],
-				Stdin:          os.Stdin,
-			}, rt.stdout, rt.stderr)
-			if code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().Bool("json", false, "force machine output at a terminal")
-	return cmd
-}
-
-// inspectReleaseCommand freezes the evidence boundary for one release and
-// reports its four views. The Environment is the positional argument and the
-// revision is an optional second one, per decision 11's rules 2 and 6.
-func inspectReleaseCommand(rt commandRuntime) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "inspect <env> [<revision>]",
-		Short: "Freeze the evidence for a release and show what it is",
-		Args:  cobra.RangeArgs(1, 2),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			forceJSON, _ := cmd.Flags().GetBool("json")
-			home, err := config.Home()
-			if err != nil {
-				return err
-			}
-			revision := ""
-			if len(args) > 1 {
-				revision = args[1]
-			}
-			code := cli.Inspect(cmd.Context(), cli.InspectOptions{
-				Root:        rt.root,
-				Home:        home,
-				Environment: args[0],
-				Revision:    revision,
-				App:         rt.app,
-				ForceJSON:   forceJSON,
-				Cluster:     discovery.Service{},
-				Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
-				Registry:    oci.Resolver{Registry: oci.Remote{}},
-			}, rt.stdout, rt.stderr)
-			if code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().Bool("json", false, "force machine output at a terminal")
-	return cmd
-}
-
-// discoverCommand and registerCommand are the first two commands on the new
-// surface (decision 11): no `setup` prefix, the positional argument is the
-// thing the user actually says, and output shape follows where it is going
-// rather than a flag.
-func discoverCommand(rt commandRuntime) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "discover <namespace>",
-		Short: "Read one namespace and report what SafeLane could release",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			forceJSON, _ := cmd.Flags().GetBool("json")
-			code := cli.Discover(cmd.Context(), cli.DiscoverOptions{
-				Root:      rt.root,
-				Namespace: args[0],
-				ForceJSON: forceJSON,
-				Service:   discovery.Service{},
-			}, rt.stdout, rt.stderr)
-			if code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().Bool("json", false, "force machine output at a terminal")
-	return cmd
-}
-
-func registerCommand(rt commandRuntime) *cobra.Command {
-	cmd := &cobra.Command{
-		Use:   "register <selection-json-path|->",
-		Short: "Confirm a discovered selection and write the configuration",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			forceJSON, _ := cmd.Flags().GetBool("json")
-			home, err := config.Home()
-			if err != nil {
-				return err
-			}
-			code := cli.Register(cmd.Context(), cli.RegisterOptions{
-				Root:          rt.root,
-				Home:          home,
-				SelectionPath: args[0],
-				App:           rt.app,
-				ForceJSON:     forceJSON,
-				Service:       discovery.Service{},
-				Stdin:         os.Stdin,
-			}, rt.stdout, rt.stderr)
-			if code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
-	}
-	cmd.Flags().Bool("json", false, "force machine output at a terminal")
-	return cmd
-}
-
-type argInjector func(commandRuntime, []string) []string
-
-func injectProject(rt commandRuntime, args []string) []string {
-	if rt.project == "" {
-		return args
-	}
-	return append([]string{"--project", rt.project}, args...)
-}
-
-func injectProjectAndStore(rt commandRuntime, args []string) []string {
-	if rt.project != "" {
-		args = append([]string{"--project", rt.project}, args...)
-	}
-	if rt.storeDir != "" {
-		args = append([]string{"--store-dir", rt.storeDir}, args...)
-	}
-	return args
-}
-
-func injectStore(rt commandRuntime, args []string) []string {
-	if rt.storeDir == "" {
-		return args
-	}
-	return append([]string{"--store-dir", rt.storeDir}, args...)
-}
-
-func legacyLeaf(rt commandRuntime, use, short string, command cli.Command, inject argInjector, prefix ...string) *cobra.Command {
-	return &cobra.Command{
-		Use:                use,
-		Short:              short,
-		DisableFlagParsing: true,
-		RunE: func(cmd *cobra.Command, args []string) error {
-			for _, arg := range args {
-				if arg == "-h" || arg == "--help" {
-					return cmd.Help()
-				}
-			}
-			callArgs := append(append([]string(nil), prefix...), inject(rt, args)...)
-			if code := command.Run(cmd.Context(), callArgs, rt.stdout, rt.stderr); code != cli.ExitOK {
-				return exitError{code: code}
-			}
-			return nil
-		},
-	}
-}
-
-func releaseGroup(rt commandRuntime) *cobra.Command {
-	releaseCmd := &cobra.Command{Use: "release", Short: "Plan, run, and prove a release", Args: cobra.NoArgs, RunE: func(cmd *cobra.Command, _ []string) error { return cmd.Help() }}
-	releaseCmd.AddCommand(
-		legacyLeaf(rt, "plan --pr <number> [--repo <owner/name>] [--environment <name>] [--json]", "Compile and persist a Safety Contract without mutating production", cli.ReleasePlanCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "run <release-id> [--yes] [--step] [--timeout 20m] [--json]", "Coordinate an approved release to a terminal outcome", cli.ReleaseRunCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "status [release-id] [--json]", "Reconcile and show release state", cli.ReleaseStatusCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "proof <release-id> [--details | --json]", "Show durable release proof", cli.ReleaseProofCommand(rt.storeDir), injectStore),
-		legacyLeaf(rt, "retry <release-id> [--json]", "Create a new attempt after re-verifying evidence", cli.ReleaseRetryCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "accept-risk <release-id> --hazard <id> --reason <reason> [--yes] [--json]", "Accept one explicitly identified uncovered hazard", cli.ReleaseAcceptRiskCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "pause <release-id> --reason <reason> [--yes] [--json]", "Emergency-pause a release", cli.ReleasePauseCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "resume <release-id> --reason <reason> [--yes] [--json]", "Resume an explicitly emergency-paused release", cli.ReleaseResumeCommand(rt.root, rt.storeDir), injectProjectAndStore),
-		legacyLeaf(rt, "abort <release-id> --reason <reason> [--yes] [--json]", "Emergency-abort a release", cli.ReleaseAbortCommand(rt.root, rt.storeDir), injectProjectAndStore),
-	)
-	return releaseCmd
-}
-
-func setupGroup(rt commandRuntime) *cobra.Command {
-	setup := legacyLeaf(rt, "setup [--yes] [--json]", "Create operator-owned configuration from repository facts", cli.SetupCommand(rt.root), func(_ commandRuntime, args []string) []string { return args })
-	setup.AddCommand(
-		legacyLeaf(rt, "inspect [--json]", "Inspect repository facts and persist their fingerprint", cli.SetupInspectCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
-		legacyLeaf(rt, "plan --findings <absolute-path|-> [--json]", "Compile agent findings into an immutable setup plan", cli.SetupPlanCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
-		legacyLeaf(rt, "apply <setup-id> [--yes] [--json]", "Apply one immutable setup plan", cli.SetupApplyCommand(rt.root), func(_ commandRuntime, args []string) []string { return args }),
-	)
-	return setup
+	return nil
 }
 
 func completionCommand(root *cobra.Command) *cobra.Command {
@@ -457,7 +320,8 @@ func completionCommand(root *cobra.Command) *cobra.Command {
 }
 
 func versionCommand() *cobra.Command {
-	return &cobra.Command{Use: "version", Short: "Print the SafeLane build version", Args: cobra.NoArgs, Run: func(cmd *cobra.Command, _ []string) {
-		fmt.Fprintln(cmd.OutOrStdout(), version)
-	}}
+	return &cobra.Command{Use: "version", Short: "Print the SafeLane build version", Args: cobra.NoArgs,
+		Run: func(cmd *cobra.Command, _ []string) {
+			fmt.Fprintln(cmd.OutOrStdout(), version)
+		}}
 }

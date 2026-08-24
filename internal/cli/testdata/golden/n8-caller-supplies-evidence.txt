@@ -1,4 +1,0 @@
-safelane release: rejected:
-  - [schema] unknown_field (evidence)
-      a Release Request carries no evidence claims
-      remedy: send repository and pull_request only

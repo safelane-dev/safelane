@@ -1,4 +1,0 @@
-safelane release run: rejected:
-  - [state] rollout_not_at_gate
-      the Rollout is Progressing toward weight 50; it is not at a gate
-      remedy: wait for the gate, then retry

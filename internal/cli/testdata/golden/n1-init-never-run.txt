@@ -1,4 +1,0 @@
-safelane release: rejected:
-  - [config] missing_project_config (project)
-      no operator configuration for this repository
-      remedy: run safelane setup from the application repository

@@ -1,0 +1,33 @@
+{
+  "name": "complete evidence, zero questions",
+  "why": "The normal case. Everything the assessment needs is in the four views, so nothing is asked and the release proceeds in the lane the configured mapping points at.",
+  "world": "healthy",
+  "expect": {
+    "eligible": true,
+    "action": "proceed",
+    "lane": "fast",
+    "asked_for_nothing": true,
+    "approvable": true
+  },
+  "assessment": {
+    "snapshot": "",
+    "observations": [
+      {
+        "statement": "The version you want to release passed its required build and test checks.",
+        "evidence": ["changes"]
+      },
+      {
+        "statement": "The container prepared for deployment came from that successful build.",
+        "evidence": ["deployment"]
+      },
+      {
+        "statement": "I reviewed everything changed since the currently running version and found nothing requiring additional release precautions.",
+        "evidence": ["changes"]
+      }
+    ],
+    "risk": "low",
+    "action": "proceed",
+    "lane": "fast",
+    "rationale": "Nothing in this change needs extra release precautions."
+  }
+}

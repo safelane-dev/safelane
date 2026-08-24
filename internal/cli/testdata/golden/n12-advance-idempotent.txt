@@ -1,3 +1,0 @@
-safelane release run: no change.
-  weight 50 was already granted at 14:26:48Z
-  current weight 50, next allowed 75

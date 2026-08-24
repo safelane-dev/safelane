@@ -143,53 +143,34 @@ func classifyRunError(verb string, err error) error {
 		"Check that the cluster is reachable and the kubeconfig/context are correct, then retry.")
 }
 
-// ApplyRow is what kubectl reported for one resource in the bundle, in
-// bundle order.
-type ApplyRow struct {
-	Ref  release.ResourceRef
-	Verb string // "unchanged", "created", "configured", ...
-}
-
-// Apply applies the bundle's exact rendered bytes as one multi-document
-// manifest -- the same bytes SafeLane hashed at inspect time, never a
-// re-render -- and reports what kubectl did to each resource, in bundle
-// order.
+// ApplyPatch sends the Release Patch to the API server.
 //
-// It is one `kubectl apply -f -` call over the whole bundle (Appendix C5),
-// not one call per resource: kubectl preserves document order for
-// multi-document input, so the Nth line of its output describes the Nth
-// resource in the bundle, and this never has to parse a kind-specific
-// resource-type prefix out of kubectl's text.
-func (e *Executor) Apply(ctx context.Context, bundle release.RenderedBundle) ([]ApplyRow, error) {
-	args := append([]string{"apply", "-f", "-"}, e.privilegedFlags()...)
-	out, err := e.run(ctx, "kubectl apply", args, bundle.Manifest())
-	if err != nil {
-		return nil, err
-	}
-
-	lines := nonEmptyLines(string(out))
-	resources := bundle.Resources()
-	if len(lines) != len(resources) {
-		return nil, release.Internal("unexpected_apply_output",
-			fmt.Sprintf("kubectl apply reported %d line(s) for %d resource(s) in the bundle", len(lines), len(resources)))
-	}
-
-	rows := make([]ApplyRow, len(resources))
-	for i, res := range resources {
-		rows[i] = ApplyRow{Ref: res.Ref(), Verb: lastField(lines[i])}
-	}
-	return rows, nil
+// `--type=json` and nothing else: the patch is the two replacements and the
+// two tests that guard them, and the API server rejects the whole document if
+// either test fails. SafeLane never sends a whole object, so there is no path
+// by which a field it did not name could be overwritten by a stale copy of the
+// Rollout.
+//
+// This replaces the old bundle apply, which sent every rendered resource and
+// therefore made every field in them SafeLane's opinion.
+func (e *Executor) ApplyPatch(ctx context.Context, patch []byte) error {
+	args := append([]string{"patch", "rollout", e.Rollout, "-n", e.Namespace,
+		"--type=json", "-p", string(patch)}, e.privilegedFlags()...)
+	_, err := e.run(ctx, "kubectl patch rollout", args, nil)
+	return err
 }
 
-// AnnotateRelease binds the controller-owned Rollout to exactly one SafeLane attempt.
-func (e *Executor) AnnotateRelease(ctx context.Context, id release.ReleaseID) error {
+// AnnotateRelease binds the controller-owned Rollout to exactly one SafeLane
+// attempt, so a Rollout somebody else's release already owns can be recognised
+// as one rather than quietly shared.
+func (e *Executor) AnnotateRelease(ctx context.Context, id string) error {
 	args := append([]string{"annotate", "rollout", e.Rollout, "-n", e.Namespace,
-		"safelane.dev/release-id=" + string(id), "--overwrite"}, e.privilegedFlags()...)
+		"safelane.dev/release-id=" + id, "--overwrite"}, e.privilegedFlags()...)
 	_, err := e.run(ctx, "kubectl annotate rollout", args, nil)
 	return err
 }
 
-// Retry restarts an explicitly aborted same-artifact Rollout without reapplying YAML.
+// Retry restarts an explicitly aborted same-artifact Rollout without reapplying it.
 func (e *Executor) Retry(ctx context.Context) error {
 	args := append([]string{"argo", "rollouts", "retry", "rollout", e.Rollout, "-n", e.Namespace}, e.privilegedFlags()...)
 	_, err := e.run(ctx, "kubectl argo rollouts retry", args, nil)

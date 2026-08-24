@@ -1,7 +1,0 @@
-Unavailable
-  – Merged commit on master       github: 403 rate limit exceeded, resets in 11m
-
-Decision
-  eligibility     indeterminate
-  reason          rate_limited
-  retryable       true
