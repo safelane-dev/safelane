@@ -180,19 +180,25 @@ func reduceSecretHunks(files []File, references []string) []File {
 	}
 	out := make([]File, 0, len(files))
 	for _, file := range files {
-		path := strings.ToLower(string(file.Path))
-		for _, reference := range references {
-			name := reference
-			if _, after, found := strings.Cut(reference, "/"); found {
-				name = after
-			}
-			if name == "" || !strings.Contains(path, strings.ToLower(name)) {
-				continue
-			}
-			file.SecretReference = reference
-			break
-		}
+		file.SecretReference = SecretReferenceForPath(string(file.Path), references)
 		out = append(out, file)
 	}
 	return out
+}
+
+// SecretReferenceForPath reports the workload reference whose name appears in
+// a changed path. It is exported so the raw-diff boundary can exclude the same
+// file before content-addressing or retrieval.
+func SecretReferenceForPath(path string, references []string) string {
+	lowerPath := strings.ToLower(path)
+	for _, reference := range references {
+		name := reference
+		if _, after, found := strings.Cut(reference, "/"); found {
+			name = after
+		}
+		if name != "" && strings.Contains(lowerPath, strings.ToLower(name)) {
+			return reference
+		}
+	}
+	return ""
 }

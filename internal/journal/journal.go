@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/privatefile"
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
@@ -349,27 +350,5 @@ func (s Store) History(limit int) ([]HistoryCard, error) {
 }
 
 func writeFileAtomic(path string, content []byte) error {
-	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	temp, err := os.CreateTemp(dir, ".journal.*")
-	if err != nil {
-		return err
-	}
-	name := temp.Name()
-	if _, err := temp.Write(content); err != nil {
-		temp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, 0o600); err != nil {
-		os.Remove(name)
-		return err
-	}
-	return os.Rename(name, path)
+	return privatefile.WriteAtomic(path, content)
 }

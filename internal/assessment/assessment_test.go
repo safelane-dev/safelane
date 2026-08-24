@@ -181,7 +181,7 @@ func TestTheFourCoverageStatesAreAccepted(t *testing.T) {
 	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "invalid_coverage")
 }
 
-// The assessment judges risk; the operator decides what each risk level is
+// The assessment judges risk; configured Release Settings decide what each risk level is
 // worth in traffic. A recommendation that could name any lane would move that
 // decision, quietly, one release at a time.
 func TestAProceedingResultMustUseTheConfiguredLaneForItsRisk(t *testing.T) {

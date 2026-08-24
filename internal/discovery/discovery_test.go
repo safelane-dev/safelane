@@ -130,6 +130,9 @@ func TestInspectReadsServicesAndAnalysis(t *testing.T) {
 	if got := target.Analysis[0]; got.Name != "success-rate" || !got.Resolved || got.Provider != "Prometheus" {
 		t.Errorf("analysis = %+v", got)
 	}
+	if target.Analysis[0].DefinitionDigest == "" {
+		t.Error("analysis definition was not content-addressed")
+	}
 	if !target.Environment.Supported {
 		t.Errorf("environment unsupported: %+v", target.Environment.Reasons)
 	}
@@ -167,10 +170,30 @@ func TestOfficialArgoFixturePassesEnvironmentAndFailsArtifact(t *testing.T) {
 	if len(target.Analysis) != 1 || target.Analysis[0].Provider != "Prometheus" {
 		t.Errorf("analysis = %+v", target.Analysis)
 	}
+	if target.TrafficRouter != "istio" {
+		t.Errorf("traffic router = %q, want istio", target.TrafficRouter)
+	}
 	// Istio traffic routing and timed pauses are shapes SafeLane leaves alone,
 	// not shapes it refuses.
 	for _, reason := range target.Environment.Reasons {
 		t.Errorf("unexpected reason: %s", reason.Code)
+	}
+}
+
+func TestInspectPreservesEveryAnalysisMetric(t *testing.T) {
+	c := demoCluster(t)
+	c.responses["get analysistemplate success-rate -o json -n safelane-demo-api"] = `{"metadata":{"name":"success-rate"},"spec":{"metrics":[` +
+		`{"name":"success","interval":"30s","successCondition":"result[0] >= 0.99","provider":{"prometheus":{}}},` +
+		`{"name":"latency","interval":"1m","successCondition":"result[0] < 0.5","provider":{"prometheus":{}}}]}}`
+	target, err := serviceWith(c).Inspect(context.Background(), ".", "safelane-demo-api", "safelane-demo-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(target.Analysis) != 1 || len(target.Analysis[0].Metrics) != 2 {
+		t.Fatalf("analysis metrics = %+v", target.Analysis)
+	}
+	if target.Analysis[0].Metrics[1].Name != "latency" || target.Analysis[0].Metrics[1].Condition != "result[0] < 0.5" {
+		t.Fatalf("second metric = %+v", target.Analysis[0].Metrics[1])
 	}
 }
 

@@ -171,7 +171,7 @@ func TestRegisterRefusesAnUnknownImpact(t *testing.T) {
 	assertRejection(t, err, "invalid_impact")
 }
 
-// A second environment is added, not substituted, and the operator's policy
+// A second environment is added, not substituted, and the user-edited lane
 // block survives.
 func TestRegisteringASecondEnvironmentPreservesTheFirstAndThePolicy(t *testing.T) {
 	home := t.TempDir()
@@ -196,7 +196,7 @@ func TestRegisteringASecondEnvironmentPreservesTheFirstAndThePolicy(t *testing.T
 
 	after := mustRead(t, path)
 	if !strings.Contains(after, "weights: [10, 100] # we ship slowly") {
-		t.Errorf("the operator's edited lane did not survive:\n%s", after)
+		t.Errorf("the user-edited lane did not survive:\n%s", after)
 	}
 	cfg, err := config.Parse([]byte(after))
 	if err != nil {

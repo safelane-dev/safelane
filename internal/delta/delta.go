@@ -135,7 +135,8 @@ type HealthObjective struct {
 	// Scope is what the measurement covers, e.g. the canary Service.
 	Scope string `json:"scope,omitempty"`
 	// Resolved is whether the referenced template could actually be read.
-	Resolved bool `json:"resolved"`
+	Resolved         bool   `json:"resolved"`
+	DefinitionDigest string `json:"definition_digest,omitempty"`
 	// Body is a handle to the template as written. It loads on demand.
 	Body *Handle `json:"body,omitempty"`
 }
@@ -362,6 +363,17 @@ func (d ReleaseDelta) snapshot() snapshot {
 // false.
 func contentHash(d ReleaseDelta) string {
 	raw, err := json.Marshal(d.snapshot())
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+// HealthDigest binds approval to the normalized health analysis the assessor
+// saw. A template change after approval must produce a different fact.
+func HealthDigest(health []HealthObjective) string {
+	raw, err := json.Marshal(health)
 	if err != nil {
 		return ""
 	}

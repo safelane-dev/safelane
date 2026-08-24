@@ -2,6 +2,8 @@ package discovery
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os/exec"
@@ -85,6 +87,9 @@ type Target struct {
 	// StableService and CanaryService are the names the Rollout gave.
 	StableService string `json:"stable_service"`
 	CanaryService string `json:"canary_service"`
+	// TrafficRouter names the configured traffic-routing provider, or is empty
+	// when Argo approximates exposure by replica count.
+	TrafficRouter string `json:"traffic_router,omitempty"`
 	// Analysis is every background analysis the Rollout references. SafeLane
 	// watches these; it never writes one.
 	Analysis []AnalysisReference `json:"analysis"`
@@ -136,6 +141,22 @@ type AnalysisReference struct {
 	Continuous bool `json:"continuous"`
 	// Resolved is whether the template actually exists and could be read.
 	Resolved bool `json:"resolved"`
+	// Metrics preserves every configured objective. The legacy summary fields
+	// above describe the first metric for compact registration output only.
+	Metrics []AnalysisMetric `json:"metrics,omitempty"`
+	// DefinitionDigest binds later approval to the complete normalized
+	// template definition, including provider queries not shown in the compact
+	// health view.
+	DefinitionDigest string `json:"definition_digest,omitempty"`
+}
+
+type AnalysisMetric struct {
+	Name         string `json:"name"`
+	Provider     string `json:"provider,omitempty"`
+	Condition    string `json:"condition,omitempty"`
+	Interval     string `json:"interval,omitempty"`
+	InitialDelay string `json:"initial_delay,omitempty"`
+	Continuous   bool   `json:"continuous"`
 }
 
 // SelectedContainer returns the container with the given name.
@@ -240,6 +261,7 @@ func (s Service) Inspect(ctx context.Context, root, namespace, rollout string) (
 	if doc.Spec.Strategy.Canary != nil {
 		target.StableService = doc.Spec.Strategy.Canary.StableService
 		target.CanaryService = doc.Spec.Strategy.Canary.CanaryService
+		target.TrafficRouter = trafficRouter(doc.Spec.Strategy.Canary.TrafficRouting)
 		compat.Reasons = append(compat.Reasons, s.resolveServices(ctx, namespace, doc)...)
 		target.Analysis, compat.Reasons = s.resolveAnalysis(ctx, namespace, doc, compat.Reasons)
 	}
@@ -296,11 +318,21 @@ func (s Service) resolveAnalysis(ctx context.Context, namespace string, doc roll
 		} else {
 			found.Resolved = true
 			found.Provider = providerOf(template)
-			describeMetric(&found, template)
+			found.DefinitionDigest = analysisDefinitionDigest(template)
+			describeMetrics(&found, template)
 		}
 		refs = append(refs, found)
 	}
 	return refs, reasons
+}
+
+func analysisDefinitionDigest(template analysisTemplateDoc) string {
+	raw, err := json.Marshal(template.Spec)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
 }
 
 // environmentCompatibility names every shape SafeLane cannot release, in the
@@ -499,18 +531,40 @@ func providerOf(template analysisTemplateDoc) string {
 // not merged: a template with several metrics is describing several things,
 // and inventing a summary of them would be SafeLane having an opinion about an
 // analysis it does not own.
-func describeMetric(ref *AnalysisReference, template analysisTemplateDoc) {
+func describeMetrics(ref *AnalysisReference, template analysisTemplateDoc) {
 	if len(template.Spec.Metrics) == 0 {
 		return
 	}
-	metric := template.Spec.Metrics[0]
-	ref.Condition = metric.SuccessCondition
-	if ref.Condition == "" && metric.FailureCondition != "" {
-		ref.Condition = "not (" + metric.FailureCondition + ")"
+	for _, metric := range template.Spec.Metrics {
+		condition := metric.SuccessCondition
+		if condition == "" && metric.FailureCondition != "" {
+			condition = "not (" + metric.FailureCondition + ")"
+		}
+		providers := make([]string, 0, len(metric.Provider))
+		for provider := range metric.Provider {
+			providers = append(providers, provider)
+		}
+		sort.Strings(providers)
+		provider := ""
+		if len(providers) > 0 {
+			provider = displayProvider(providers[0])
+		}
+		ref.Metrics = append(ref.Metrics, AnalysisMetric{
+			Name: metric.Name, Provider: provider, Condition: condition,
+			Interval: metric.Interval, InitialDelay: metric.InitialDelay, Continuous: metric.Count == 0,
+		})
 	}
-	ref.Interval = metric.Interval
-	ref.InitialDelay = metric.InitialDelay
-	ref.Continuous = metric.Count == 0
+	first := ref.Metrics[0]
+	ref.Condition, ref.Interval, ref.InitialDelay, ref.Continuous = first.Condition, first.Interval, first.InitialDelay, first.Continuous
+}
+
+func trafficRouter(routing map[string]any) string {
+	names := make([]string, 0, len(routing))
+	for name := range routing {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 var providerNames = map[string]string{

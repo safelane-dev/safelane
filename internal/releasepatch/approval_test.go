@@ -79,6 +79,7 @@ func TestAnyMaterialChangeCancelsTheApproval(t *testing.T) {
 		"a replaced Rollout":             func(f *releasepatch.Facts) { f.RolloutUID = "another-uid" },
 		"a changed Rollout":              func(f *releasepatch.Facts) { f.ResourceVersion = "84999" },
 		"a different patch":              func(f *releasepatch.Facts) { f.PatchDigest = "sha256:other" },
+		"changed health analysis":        func(f *releasepatch.Facts) { f.AnalysisDigest = "sha256:other-analysis" },
 	} {
 		t.Run(name, func(t *testing.T) {
 			approval, _ := granted(t)

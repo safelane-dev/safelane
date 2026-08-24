@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -8,9 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/delta"
+	"github.com/AndrewMaged814/safelane/internal/privatefile"
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
@@ -23,10 +26,11 @@ type DiffSource interface {
 }
 
 type diffLocator struct {
-	Handle     delta.Handle `json:"handle"`
-	Repository string       `json:"repository"`
-	Base       string       `json:"base"`
-	Head       string       `json:"head"`
+	Handle     delta.Handle      `json:"handle"`
+	Repository string            `json:"repository"`
+	Base       string            `json:"base"`
+	Head       string            `json:"head"`
+	Excluded   map[string]string `json:"excluded,omitempty"`
 }
 
 type EvidenceOptions struct {
@@ -62,6 +66,7 @@ func Evidence(ctx context.Context, opts EvidenceOptions, stdout, stderr io.Write
 	if err != nil {
 		return writeResultError(stderr, "evidence", sourceEvidenceUnavailable("source diff", err))
 	}
+	content = sanitizeDiff(content, locator.Excluded)
 	if err := locator.Handle.Verify(content); err != nil {
 		return writeResultError(stderr, "evidence", release.UnknownEvidenceError("source_diff_changed", "diff",
 			err.Error(), "Inspect the release again; the retrieved evidence did not match the frozen snapshot."))
@@ -70,6 +75,46 @@ func Evidence(ctx context.Context, opts EvidenceOptions, stdout, stderr io.Write
 		return writeResultError(stderr, "evidence", err)
 	}
 	return ExitOK
+}
+
+func excludedDiffFiles(files []delta.File) map[string]string {
+	excluded := map[string]string{}
+	for _, file := range files {
+		if file.SecretReference != "" {
+			excluded[string(file.Path)] = file.SecretReference
+		}
+	}
+	return excluded
+}
+
+func sanitizeDiff(content []byte, excluded map[string]string) []byte {
+	if len(excluded) == 0 {
+		return content
+	}
+	var output []byte
+	sections := bytes.SplitAfter(content, []byte("\n"))
+	skipping := false
+	for _, line := range sections {
+		text := strings.TrimSuffix(string(line), "\n")
+		if strings.HasPrefix(text, "diff --git ") {
+			skipping = false
+			for path, reference := range excluded {
+				if strings.Contains(text, " b/"+path) || strings.Contains(text, ` "b/`+path+`"`) {
+					output = append(output, line...)
+					output = append(output, []byte("SafeLane omitted this file because it touches "+reference+".\n")...)
+					skipping = true
+					break
+				}
+			}
+			if skipping {
+				continue
+			}
+		}
+		if !skipping {
+			output = append(output, line...)
+		}
+	}
+	return output
 }
 
 func diffLocatorPath(environmentDir, handleID string) (string, error) {
@@ -86,37 +131,11 @@ func saveDiffLocator(environmentDir string, locator diffLocator) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
 	raw, err := json.MarshalIndent(locator, "", "  ")
 	if err != nil {
 		return err
 	}
-	temporary, err := os.CreateTemp(filepath.Dir(path), ".diff-locator.*.json")
-	if err != nil {
-		return err
-	}
-	temporaryName := temporary.Name()
-	removeTemporary := func() { _ = os.Remove(temporaryName) }
-	if _, err := temporary.Write(append(raw, '\n')); err != nil {
-		_ = temporary.Close()
-		removeTemporary()
-		return err
-	}
-	if err := temporary.Close(); err != nil {
-		removeTemporary()
-		return err
-	}
-	if err := os.Chmod(temporaryName, 0o600); err != nil {
-		removeTemporary()
-		return err
-	}
-	if err := os.Rename(temporaryName, path); err != nil {
-		removeTemporary()
-		return err
-	}
-	return nil
+	return privatefile.WriteAtomic(path, append(raw, '\n'))
 }
 
 func loadDiffLocator(environmentDir, handleID string) (diffLocator, error) {

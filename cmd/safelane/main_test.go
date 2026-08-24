@@ -2,9 +2,31 @@ package main
 
 import (
 	"bytes"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AndrewMaged814/safelane/internal/config"
 )
+
+func TestProductionReadersLoadCompactEnvironmentHistory(t *testing.T) {
+	taskHome := t.TempDir()
+	t.Setenv(config.HomeEnv, taskHome)
+	dir := config.ForApp(taskHome, "payments-api").ForEnvironment("production").Dir
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	line := `{"at":"2026-08-24T10:00:00Z","candidate":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","recommendation":"proceed","lane":"fast","reason":"bounded change","outcome":"released"}`
+	if err := os.WriteFile(filepath.Join(dir, "history.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	readers := (commandRuntime{}).readers("production", "", false)
+	cards, err := readers.History("payments-api", "production")
+	if err != nil || len(cards) != 1 || cards[0].Lane != "fast" || cards[0].Note != "bounded change" {
+		t.Fatalf("history = %+v, %v", cards, err)
+	}
+}
 
 // The command surface is the contract an agent and a person both drive, so it
 // is asserted rather than described. Every command decision 11 names is here,

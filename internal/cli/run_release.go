@@ -11,6 +11,7 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/delta"
 	"github.com/AndrewMaged814/safelane/internal/journal"
 	"github.com/AndrewMaged814/safelane/internal/orchestrate"
 	"github.com/AndrewMaged814/safelane/internal/release"
@@ -253,6 +254,7 @@ func currentFacts(ctx context.Context, opts RunOptions, cfg config.Config,
 		RolloutUID:      patch.RolloutUID,
 		ResourceVersion: patch.ResourceVersion,
 		PatchDigest:     patch.Digest(),
+		AnalysisDigest:  delta.HealthDigest(frozen.Health()),
 	}, nil
 }
 

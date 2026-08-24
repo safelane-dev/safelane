@@ -15,7 +15,7 @@
 // SafeLane makes the opposite promise: configuration written by an earlier
 // version is ignored, never migrated, and never deleted. [Load] says so once, in
 // one sentence, and points at registration. Nothing in this package removes a
-// file from a user's home directory, so an operator who was mid-migration keeps
+// file from a user's home directory, so a user who was mid-migration keeps
 // whatever they had.
 //
 // # Derived, not configured

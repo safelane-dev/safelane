@@ -247,6 +247,7 @@ func savePending(ctx context.Context, opts RecommendOptions, cfg config.Config,
 			RolloutUID:      patch.RolloutUID,
 			ResourceVersion: patch.ResourceVersion,
 			PatchDigest:     patch.Digest(),
+			AnalysisDigest:  delta.HealthDigest(frozen.Health()),
 		}
 	}
 	return releasepatch.SavePending(dir, pending)

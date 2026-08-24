@@ -39,7 +39,9 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/cli"
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/delta"
 	"github.com/AndrewMaged814/safelane/internal/discovery"
+	"github.com/AndrewMaged814/safelane/internal/journal"
 	githubverify "github.com/AndrewMaged814/safelane/internal/verify/github"
 	"github.com/AndrewMaged814/safelane/internal/verify/oci"
 	"github.com/spf13/cobra"
@@ -232,6 +234,21 @@ func (rt commandRuntime) readers(environment, revision string, forceJSON bool) c
 		Cluster:     discovery.Service{},
 		Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
 		Registry:    oci.Resolver{Registry: oci.Remote{}},
+		History: func(application, environment string) ([]delta.HistoryCard, error) {
+			dir := config.ForApp(home, application).ForEnvironment(environment).Dir
+			cards, err := (journal.Store{Dir: dir}).History(delta.HistoryLimit)
+			if err != nil {
+				return nil, err
+			}
+			result := make([]delta.HistoryCard, 0, len(cards))
+			for _, card := range cards {
+				result = append(result, delta.HistoryCard{
+					At: card.At, Revision: card.Candidate, Outcome: card.Outcome,
+					Lane: card.Lane, Note: delta.Untrusted(card.Reason),
+				})
+			}
+			return result, nil
+		},
 	}
 }
 

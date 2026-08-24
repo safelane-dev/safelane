@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// HomeEnv overrides where SafeLane keeps its state. Tests set it; operators
+// HomeEnv overrides where SafeLane keeps its state. Tests set it; users
 // rarely need to.
 const HomeEnv = "SAFELANE_HOME"
 

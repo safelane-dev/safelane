@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/privatefile"
 	"github.com/AndrewMaged814/safelane/internal/release"
 	githubverify "github.com/AndrewMaged814/safelane/internal/verify/github"
 )
@@ -98,12 +99,5 @@ func saveConfirmedBuild(path string, confirmation confirmedBuild) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-		return err
-	}
-	temporary := path + ".new"
-	if err := os.WriteFile(temporary, append(raw, '\n'), 0o600); err != nil {
-		return err
-	}
-	return os.Rename(temporary, path)
+	return privatefile.WriteAtomic(path, append(raw, '\n'))
 }

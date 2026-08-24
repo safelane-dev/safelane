@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/AndrewMaged814/safelane/internal/privatefile"
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
@@ -50,33 +51,11 @@ func PendingFile(environmentDir string) string {
 
 // SavePending writes the pending recommendation atomically.
 func SavePending(environmentDir string, pending Pending) error {
-	if err := os.MkdirAll(environmentDir, 0o700); err != nil {
-		return fmt.Errorf("create %s: %w", environmentDir, err)
-	}
 	raw, err := json.MarshalIndent(pending, "", "  ")
 	if err != nil {
 		return err
 	}
-	path := PendingFile(environmentDir)
-	temp, err := os.CreateTemp(environmentDir, ".pending.*.json")
-	if err != nil {
-		return fmt.Errorf("create a temporary file in %s: %w", environmentDir, err)
-	}
-	name := temp.Name()
-	if _, err := temp.Write(append(raw, '\n')); err != nil {
-		temp.Close()
-		os.Remove(name)
-		return err
-	}
-	if err := temp.Close(); err != nil {
-		os.Remove(name)
-		return err
-	}
-	if err := os.Chmod(name, 0o600); err != nil {
-		os.Remove(name)
-		return err
-	}
-	return os.Rename(name, path)
+	return privatefile.WriteAtomic(PendingFile(environmentDir), append(raw, '\n'))
 }
 
 // LoadPending reads the pending recommendation.

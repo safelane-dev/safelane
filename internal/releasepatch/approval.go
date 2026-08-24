@@ -94,6 +94,7 @@ type Facts struct {
 	RolloutUID      string
 	ResourceVersion string
 	PatchDigest     string
+	AnalysisDigest  string
 }
 
 // Recheck compares what was true at approval with what is true now.
@@ -127,6 +128,8 @@ func (a Approval) Recheck(approved, current Facts, now time.Time) (Approval, err
 			"the Rollout changed"},
 		{"patch", approved.PatchDigest, current.PatchDigest,
 			"the change SafeLane would apply is no longer the one you approved"},
+		{"health analysis", approved.AnalysisDigest, current.AnalysisDigest,
+			"the health checks that decide whether this release continues changed"},
 	} {
 		if check.was == check.is {
 			continue

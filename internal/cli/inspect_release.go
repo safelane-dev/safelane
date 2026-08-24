@@ -173,14 +173,18 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 
 	history := []delta.HistoryCard(nil)
 	if opts.History != nil {
-		history, _ = opts.History(application, environment.Name)
+		history, err = opts.History(application, environment.Name)
+		if err != nil {
+			return delta.ReleaseDelta{}, github.Eligibility{}, release.Internal("read_release_history",
+				fmt.Sprintf("could not read release history: %v", err))
+		}
 	}
 
-	changes := changeSetFrom(comparison)
+	changes := changeSetFrom(comparison, delta.SecretReferencesIn(target.RolloutJSON))
 	if len(changes.Diffs) > 0 {
 		if err := saveDiffLocator(environmentDir, diffLocator{
 			Handle: changes.Diffs[0], Repository: cfg.Application.Repository,
-			Base: comparison.Base, Head: comparison.Head,
+			Base: comparison.Base, Head: comparison.Head, Excluded: excludedDiffFiles(changes.Files),
 		}); err != nil {
 			return delta.ReleaseDelta{}, github.Eligibility{}, release.Internal("save_diff_locator",
 				fmt.Sprintf("could not save the source diff locator: %v", err))
@@ -277,7 +281,7 @@ func findCandidateArtifact(ctx context.Context, resolver oci.Resolver, repositor
 	return artifact, metadata
 }
 
-func changeSetFrom(comparison github.Comparison) delta.ChangeSet {
+func changeSetFrom(comparison github.Comparison, secretReferences []string) delta.ChangeSet {
 	set := delta.ChangeSet{
 		Base: comparison.Base, Head: comparison.Head,
 		Status: comparison.Status, AheadBy: comparison.AheadBy,
@@ -289,9 +293,10 @@ func changeSetFrom(comparison github.Comparison) delta.ChangeSet {
 		})
 	}
 	for _, file := range comparison.Files {
+		secretReference := delta.SecretReferenceForPath(file.Path, secretReferences)
 		set.Files = append(set.Files, delta.File{
 			Path: delta.Untrusted(file.Path), Status: file.Status,
-			Additions: file.Additions, Deletions: file.Deletions,
+			Additions: file.Additions, Deletions: file.Deletions, SecretReference: secretReference,
 		})
 	}
 	for _, pr := range comparison.PullRequests {
@@ -301,7 +306,8 @@ func changeSetFrom(comparison github.Comparison) delta.ChangeSet {
 		})
 	}
 	if len(comparison.Diff) > 0 {
-		set.Diffs = append(set.Diffs, delta.NewHandle("diff", comparison.Diff,
+		sanitized := sanitizeDiff(comparison.Diff, excludedDiffFiles(set.Files))
+		set.Diffs = append(set.Diffs, delta.NewHandle("diff", sanitized,
 			fmt.Sprintf("complete %s...%s source diff", comparison.Base, comparison.Head)))
 	}
 	return set
@@ -352,6 +358,10 @@ func laneChoices(settings config.ReleaseSettings) []delta.LaneChoice {
 // replica-approximated weight is not a traffic percentage, and calling it one
 // would overstate what the canary actually proved.
 func exposureMechanism(target discovery.Target) string {
+	if target.TrafficRouter != "" {
+		return fmt.Sprintf("request traffic routed by %s between Services %s and %s",
+			target.TrafficRouter, target.StableService, target.CanaryService)
+	}
 	if target.CanaryService == "" {
 		return "no canary Service; exposure cannot be described"
 	}
@@ -375,12 +385,27 @@ func healthFrom(target discovery.Target) []delta.HealthObjective {
 		if target.CanaryService != "" {
 			scope = "the canary Service " + target.CanaryService
 		}
-		objectives = append(objectives, delta.HealthObjective{
-			Name: delta.Untrusted(analysis.Name), Provider: analysis.Provider,
-			Condition: delta.Untrusted(analysis.Condition),
-			Interval:  analysis.Interval, InitialDelay: analysis.InitialDelay,
-			Scope: scope, Resolved: analysis.Resolved,
-		})
+		if len(analysis.Metrics) == 0 {
+			objectives = append(objectives, delta.HealthObjective{
+				Name: delta.Untrusted(analysis.Name), Provider: analysis.Provider,
+				Condition: delta.Untrusted(analysis.Condition), Interval: analysis.Interval,
+				InitialDelay: analysis.InitialDelay, Scope: scope, Resolved: analysis.Resolved,
+				DefinitionDigest: analysis.DefinitionDigest,
+			})
+			continue
+		}
+		for _, metric := range analysis.Metrics {
+			name := analysis.Name
+			if len(analysis.Metrics) > 1 && metric.Name != "" {
+				name += "/" + metric.Name
+			}
+			objectives = append(objectives, delta.HealthObjective{
+				Name: delta.Untrusted(name), Provider: metric.Provider,
+				Condition: delta.Untrusted(metric.Condition), Interval: metric.Interval,
+				InitialDelay: metric.InitialDelay, Scope: scope, Resolved: analysis.Resolved,
+				DefinitionDigest: analysis.DefinitionDigest,
+			})
+		}
 	}
 	return objectives
 }

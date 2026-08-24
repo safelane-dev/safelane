@@ -297,6 +297,31 @@ func TestEvidenceRefusesBytesThatDoNotMatchTheFrozenHandle(t *testing.T) {
 	}
 }
 
+func TestEvidenceNeverEmitsASecretReferencedDiff(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	diff := []byte("diff --git a/config/payments-api-secrets.yaml b/config/payments-api-secrets.yaml\n+token: " + liveSecret + "\n")
+	source.comparison.Files = []github.FileChange{{Path: "config/payments-api-secrets.yaml", Status: "modified"}}
+	source.comparison.Diff = diff
+	opts.Source = source
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if frozen.Changes().Files[0].SecretReference != "Secret/payments-api-secrets" {
+		t.Fatalf("secret reference = %q", frozen.Changes().Files[0].SecretReference)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Evidence(context.Background(), EvidenceOptions{
+		Root: ".", Home: opts.Home, Environment: "production", HandleID: frozen.Changes().Diffs[0].ID,
+		Origin: func(string) (string, error) { return "acme/payments-api", nil }, Source: diffFixture{content: diff},
+	}, &stdout, &stderr)
+	if code != ExitOK || strings.Contains(stdout.String(), liveSecret) || !strings.Contains(stdout.String(), "SafeLane omitted this file") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
 func TestFreezeDeltaDoesNotHideSourceEvidenceFailures(t *testing.T) {
 	opts := inspectOptions(t)
 	source := defaultInspectSource()
@@ -446,5 +471,20 @@ func TestExposureIsDescribedHonestly(t *testing.T) {
 	}
 	if !strings.Contains(frozen.DeploymentView(), "approximated by replica count") {
 		t.Errorf("deployment view:\n%s", frozen.DeploymentView())
+	}
+}
+
+func TestRoutedExposureNamesTheTrafficRouter(t *testing.T) {
+	opts := inspectOptions(t)
+	cluster := inspectCluster()
+	cluster["get rollouts.argoproj.io payments-api -n payments -o json"] = strings.Replace(
+		deployedRollout(), `"canary": {`, `"canary": {"trafficRouting":{"istio":{"virtualService":{"name":"payments-api"}}},`, 1)
+	opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(frozen.DeploymentView(), "request traffic routed by istio") {
+		t.Fatalf("deployment view:\n%s", frozen.DeploymentView())
 	}
 }

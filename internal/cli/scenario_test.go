@@ -135,7 +135,14 @@ func world(t *testing.T, name string) InspectOptions {
 		opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
 		return opts
 
-	case "routed-shape", "unsupported-claim":
+	case "routed-shape":
+		cluster := inspectCluster()
+		rollout := strings.Replace(deployedRollout(), `"canary": {`, `"canary": {"trafficRouting":{"nginx":{"stableIngress":"payments-api"}},`, 1)
+		cluster["get rollouts.argoproj.io payments-api -n payments -o json"] = rollout
+		opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
+		return opts
+
+	case "unsupported-claim":
 		return opts
 	}
 
@@ -204,35 +211,43 @@ func TestActiveAgentAssessmentScenarios(t *testing.T) {
 		if err := json.Unmarshal(raw, &scenario); err != nil {
 			t.Fatal(err)
 		}
-		if !scenario.Expect.Eligible || scenario.Expect.AssessmentRejected || scenario.World == "deployment-shapes" {
+		if !scenario.Expect.Eligible || scenario.Expect.AssessmentRejected {
 			continue
 		}
-		t.Run(scenario.Name, func(t *testing.T) {
-			opts := world(t, scenario.World)
-			frozen, eligibility, err := FreezeDelta(context.Background(), opts)
-			if err != nil || !eligibility.Eligible {
-				t.Fatalf("freeze: eligible=%t, err=%v", eligibility.Eligible, err)
-			}
-			turn := runAssessmentAgent(t, provider, string(skill), frozen)
-			t.Logf("questions: %+v\nassessment: %s", turn.Questions, turn.Assessment)
-			checkAgentQuestions(t, scenario, turn.Questions)
+		worlds := []string{scenario.World}
+		if scenario.World == "deployment-shapes" {
+			worlds = []string{"replica-shape", "routed-shape"}
+		}
+		for _, worldName := range worlds {
+			worldName := worldName
+			t.Run(scenario.Name+"/"+worldName, func(t *testing.T) {
+				opts := world(t, worldName)
+				frozen, eligibility, err := FreezeDelta(context.Background(), opts)
+				if err != nil || !eligibility.Eligible {
+					t.Fatalf("freeze: eligible=%t, err=%v", eligibility.Eligible, err)
+				}
+				turn := runAssessmentAgent(t, provider, string(skill), frozen)
+				t.Logf("questions: %+v\nassessment: %s", turn.Questions, turn.Assessment)
+				checkAgentTrace(t, frozen, turn)
+				checkAgentQuestions(t, scenario, turn.Questions)
 
-			var stdout, stderr bytes.Buffer
-			code := Recommend(context.Background(), RecommendOptions{
-				Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(turn.Assessment),
-			}, &stdout, &stderr)
-			if code != ExitOK {
-				t.Fatalf("agent assessment was rejected: %s\n%s", stderr.String(), turn.Assessment)
-			}
-			var result struct {
-				Recommendation assessment.Recommendation `json:"recommendation"`
-				Text           string                    `json:"text"`
-			}
-			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
-				t.Fatal(err)
-			}
-			checkDirection(t, scenario, result.Recommendation, result.Text)
-		})
+				var stdout, stderr bytes.Buffer
+				code := Recommend(context.Background(), RecommendOptions{
+					Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(turn.Assessment),
+				}, &stdout, &stderr)
+				if code != ExitOK {
+					t.Fatalf("agent assessment was rejected: %s\n%s", stderr.String(), turn.Assessment)
+				}
+				var result struct {
+					Recommendation assessment.Recommendation `json:"recommendation"`
+					Text           string                    `json:"text"`
+				}
+				if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+					t.Fatal(err)
+				}
+				checkDirection(t, scenario, result.Recommendation, result.Text)
+			})
+		}
 	}
 }
 
@@ -242,8 +257,11 @@ type agentQuestion struct {
 }
 
 type agentAssessmentTurn struct {
-	Questions  []agentQuestion `json:"questions"`
-	Assessment json.RawMessage `json:"assessment"`
+	ViewsRead     []string        `json:"views_read"`
+	Investigated  []string        `json:"investigated"`
+	GeneralReview bool            `json:"general_code_review"`
+	Questions     []agentQuestion `json:"questions"`
+	Assessment    json.RawMessage `json:"assessment"`
 }
 
 func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.ReleaseDelta) agentAssessmentTurn {
@@ -258,10 +276,10 @@ func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.Relea
 	}
 	prompt := fmt.Sprintf(`You are evaluating SafeLane's active assessment skill. Follow the Assess section below exactly.
 
-For this offline evaluation, do not inspect the repository or use tools. Read all four supplied frozen views. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
+For this offline evaluation, use only the supplied typed evidence. Record the view names in the order you read them, followed by any listed evidence handles you investigated. Do not perform a general code review. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
 
 Return JSON only with this outer shape:
-{"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
+{"views_read":["changes","deployment","health","history"],"investigated":[],"general_code_review":false,"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
 
 Inside assessment, copy the skill's exact field names and nesting. In particular, observations use statement; hazards use name, evidence, preconditions, consequence, and a nested coverage object. Do not use observation, hazard, recommendation, decision, user_facts, or other synonyms.
 
@@ -314,6 +332,25 @@ AVAILABLE HANDLES:
 		t.Fatalf("agent returned no final assessment: %s", raw)
 	}
 	return turn
+}
+
+func checkAgentTrace(t *testing.T, frozen delta.ReleaseDelta, turn agentAssessmentTurn) {
+	t.Helper()
+	if strings.Join(turn.ViewsRead, ",") != strings.Join(delta.ViewNames, ",") {
+		t.Errorf("views were not read before investigation in the required order: %v", turn.ViewsRead)
+	}
+	if turn.GeneralReview {
+		t.Error("agent performed a general code review")
+	}
+	known := map[string]bool{}
+	for _, handle := range frozen.Handles() {
+		known[handle.ID] = true
+	}
+	for _, handle := range turn.Investigated {
+		if !known[handle] {
+			t.Errorf("agent investigated an unknown evidence handle %q", handle)
+		}
+	}
 }
 
 func checkAgentQuestions(t *testing.T, scenario scenario, questions []agentQuestion) {
