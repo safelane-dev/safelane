@@ -1,37 +1,38 @@
 ---
-title: Assessment
-description: How heuristic and model assessment combine without widening authority.
+title: Assessment & Recommendation
+description: Learn how SafeLane recommends proceed or wait.
 ---
 
-## A model can sound certain about a change it cannot see
+SafeLane assesses one release. It does not review general code quality.
 
-A model may miss a migration, misread an agent-authored diff, or time out. The model is evidence about risk. It is not the authority that sets the rollout envelope.
+## Eligibility
 
-```mermaid
-flowchart LR
-  A["Changed files, lines, agent evidence"] --> B["Heuristic floor"]
-  A --> C["Best-effort model"]
-  B --> D["Combined risk"]
-  C --> D
-  D --> E["Risk → lane"]
-  E --> F["Policy envelope"]
-```
+SafeLane stops before assessment when:
 
-The heuristic always runs. It sets the floor. The model runs best-effort and may only raise risk. The record stores both verdicts, the combined risk, the lane, and the facts used.
+- CI did not pass;
+- the OCI image does not match the candidate;
+- the running version is unknown;
+- the source histories are not related.
 
-| Caller-claimed risk | SafeLane-collected assessment |
+## Evidence
+
+The agent reads four views:
+
+| View | Content |
 | --- | --- |
-| “Low. Use fast.” | The heuristic sees charts/**; minimum risk is high. |
-| “Medium. Use standard.” | The model says low; the heuristic floor remains medium. |
-| No claim | SafeLane records the facts and selects from the policy. |
+| Changes | All changes from the running version to the candidate |
+| Deployment | Environment, Rollout, container, and patch |
+| Health | Configured analysis and measurement rules |
+| History | Up to ten recent releases for this target |
 
-## Why the model can only narrow a lane
+The agent can open more evidence for a specific question. It asks you one question only when a required fact is not available.
 
-Widening authority from an uncertain signal is the wrong failure mode. A model that misses risk leaves the heuristic floor in place. A model that finds more risk moves the release toward guarded.
+## Recommendation
 
-## Next
+**Proceed** means that a configured release lane can control the identified hazards.
 
-- [The Release Policy](./release-policy/)
-- [The Release Record & Proof](./record-and-proof/)
-- [CLI Command Reference](../reference/cli/)
+**Wait** means that evidence is missing or a health check does not cover a credible hazard.
 
+SafeLane validates each recommendation. If the result is not valid after one correction, SafeLane recommends **wait**.
+
+Next: [Release lanes](./release-policy/) and [approval boundary](./boundary/).

@@ -1,40 +1,38 @@
 ---
-title: The Boundary
-description: Separate caller and controller identities keep agents away from production credentials.
+title: Approval Boundary
+description: Learn what one SafeLane approval permits.
 ---
 
-## One credential makes every instruction a permission
+SafeLane starts the release only after one clear approval.
 
-If an agent, CI job, and controller share a kubeconfig, a caller that ignores the workflow can patch the Rollout directly. Kubernetes cannot distinguish intent after the credential is shared.
+## One release
 
-```mermaid
-flowchart LR
-  A["Caller identity"] -->|"read-only / no patch"| B["SafeLane"]
-  B -->|"controller kubeconfig"| C["Release Controller"]
-  C -->|"narrow patch"| D["Protected Rollout"]
-  A -. "direct patch" .-> D
-  D -. "Kubernetes denies" .-> A
+The approval applies to:
+
+- one Application and Environment;
+- one source revision and OCI digest;
+- one running baseline;
+- one health analysis set;
+- one release lane;
+- one patch.
+
+SafeLane checks these facts again before it changes the Rollout. A change cancels the approval.
+
+## Two changes
+
+SafeLane can replace only:
+
+```text
+/spec/template/spec/containers/<selected-index>/image
+/spec/strategy/canary/steps
 ```
 
-| Without the boundary | With the boundary |
-| --- | --- |
-| The agent holds the controller credential. | The agent holds no controller credential. |
-| Direct patch permission and release permission are the same. | Caller and controller identities have separate capabilities. |
-| Kubernetes sees one principal. | Kubernetes sees a restricted caller and a privileged controller. |
+It does not change probes, resources, secrets, Services, or health analysis.
 
-The record stores caller_identity, controller_identity, and caller capability. The controller kubeconfig and context come from operator-owned project.yml settings.
+## Two identities
 
-## Why the controller credential is never in the agent's kubeconfig
+The caller can read the target. The SafeLane controller can read and patch only the registered Rollout. It can also read its AnalysisRuns.
 
-The agent is allowed to request and drive a release. It is not allowed to become the controller. Keeping the credential outside the caller's environment turns that rule into a credential boundary, not a prompt instruction.
+Argo remains the authority for health, abort, and rollback.
 
-## Why the request schema forbids a lane field
-
-The caller can name the change. It cannot name the authority that change receives. SafeLane derives the decision from evidence and policy.
-
-## Next
-
-- [Setting Up an Application](../guides/setting-up/)
-- [The Release Record & Proof](./record-and-proof/)
-- [Handling a Paused or Aborted Rollout](../guides/rollout-recovery/)
-
+Next: [Run a release](../guides/release-end-to-end/) and [monitor a release](../guides/rollout-recovery/).

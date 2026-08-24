@@ -1,60 +1,47 @@
 ---
 title: SafeLane
-description: Ship reviewed releases on autopilot while keeping every rollout inside operator rules.
+description: Autonomous progressive delivery for coding agents on existing Argo Rollouts.
 template: splash
 hero:
-  tagline: Ship on autopilot. Stay in control.
+  tagline: Autonomous progressive delivery for coding agents.
+  image:
+    file: ../../assets/safelane-mark.png
+    alt: SafeLane mark
   actions:
-    - text: Start here
-      link: /safelane/start-here/introduction
+    - text: See a release
+      link: /safelane/start-here/quick-start
       icon: right-arrow
+      variant: primary
     - text: View on GitHub
       link: https://github.com/AndrewMaged814/safelane
       icon: external
+      variant: minimal
 ---
 
-## Stop shipping every change the same way
+<p className="eyebrow">Approve once. SafeLane runs the release.</p>
 
-Coding agents can operate deployment tools, but they commonly rediscover the latest PR, spend tokens rebuilding context, check generic health endpoints, and ask for approval at every gate.
+<p className="lead">SafeLane checks the exact artifact, recommends a rollout, and asks for one approval. It then coordinates your existing Argo Rollout to completion or a safe stop.</p>
 
-SafeLane gives them one release path. You identify an exact merged pull request and approve its frozen Safety Contract once. SafeLane stays attached and coordinates Argo to promotion, rollback, or one specific decision-required outcome.
+<div className="trust-strip">
+  <div><strong>Exact release</strong><span>Source, build, and image match</span></div>
+  <div><strong>One approval</strong><span>Valid for one release only</span></div>
+  <div><strong>Small patch</strong><span>Image and canary steps only</span></div>
+  <div><strong>Argo health</strong><span>Your analysis stays in control</span></div>
+</div>
 
-Argo remains the rollout engine: it evaluates Analysis Jobs, changes traffic, and aborts on failure. SafeLane assesses the change, bounds progression authority, reconciles execution, and writes proof.
+## One request. One approval. One complete release.
 
-```mermaid
-flowchart LR
-  subgraph before["Without SafeLane"]
-    A["Agent"] -->|"claims risk + sends YAML"| B["Shared credential"]
-    B --> C["Cluster"]
-  end
-  subgraph after["With SafeLane"]
-    D["Agent / CI / human"] -->|"PR number"| E["SafeLane"]
-    E --> F["Policy + evidence"]
-    F --> G["Constrained controller"]
-    G --> H["Argo Rollouts"]
-  end
-  before ~~~ after
-```
+<div className="path-grid">
+  <div className="path-step"><span>01 · CHECK</span><strong>Identify the release</strong><p>SafeLane compares the candidate with the version that runs now.</p></div>
+  <div className="path-step"><span>02 · DECIDE</span><strong>Recommend a lane</strong><p>SafeLane shows the evidence, health checks, and rollout steps.</p></div>
+  <div className="path-step"><span>03 · RELEASE</span><strong>Stay with Argo</strong><p>SafeLane monitors each gate until the release stops or completes.</p></div>
+</div>
 
-| Without SafeLane | With SafeLane |
-| --- | --- |
-| The caller supplies risk, lane, and Kubernetes objects. | The caller supplies release identity. SafeLane collects evidence and renders trusted objects. |
-| The agent babysits every gate. | One approved contract drives the attached release loop. |
-| Release facts live in logs and chat. | Eligibility, execution, boundary, and outcome become one Release Proof. |
+<figure className="terminal-figure terminal-figure--large">
+  <img src="/safelane/examples/recommendation-example.png" alt="SafeLane recommends a 50 to 100 percent rollout for payments-api and asks for approval." />
+  <figcaption><span className="example-label">Example</span>SafeLane shows why the release can proceed and what the approval permits.</figcaption>
+</figure>
 
-Deterministic evidence and mandatory runtime-analysis failures remain fail-closed. An operational semantic-model failure selects a recorded Guarded fallback instead of turning tool availability into a product outage.
+SafeLane uses your existing canary Rollout and health analysis. It does not provision a cluster or replace Argo.
 
-## What SafeLane owns
-
-- <code>safelane release plan</code>, which binds a merged pull request to verified GitHub and GHCR evidence.
-- The operator-owned <code>policy.yml</code>, which maps risk to named rollout lanes.
-- The operator-owned Release Template, rendered once and hashed before execution.
-- An attached coordinator that requests only progression already authorized by the Safety Contract.
-- A persisted Release Record and the <code>safelane release proof</code> view of it.
-
-## Next
-
-- [Quick Start](./start-here/quick-start/)
-- [The Release Policy](./concepts/release-policy/)
-- [CLI Command Reference](./reference/cli/)
-
+[See the full release →](./start-here/quick-start/)

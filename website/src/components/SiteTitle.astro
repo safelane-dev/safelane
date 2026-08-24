@@ -5,6 +5,7 @@ const homeHref = new URL(`${base}/`, Astro.site).href;
 ---
 
 <a href={homeHref} class="site-title sl-flex">
+	<img src={`${base}/safelane-mark.png`} alt="" width="28" height="28" />
 	<span translate="no">{siteTitle}</span>
 </a>
 
@@ -14,8 +15,9 @@ const homeHref = new URL(`${base}/`, Astro.site).href;
 		gap: var(--sl-nav-gap);
 		font-size: var(--sl-text-h4);
 		font-weight: 600;
-		color: var(--sl-color-text-accent);
+		color: var(--sl-color-white);
 		text-decoration: none;
 		white-space: nowrap;
 	}
+	.site-title img { filter: drop-shadow(0 0 9px rgb(255 82 55 / 45%)); }
 </style>

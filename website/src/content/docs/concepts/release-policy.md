@@ -1,39 +1,26 @@
 ---
-title: The Release Policy
-description: Lanes, weights, evidence, and the risk-to-lane mapping.
+title: Release Lanes
+description: Learn how SafeLane selects Argo canary steps.
 ---
 
-## A rollout without a policy is a caller's opinion
+A release lane is a configured sequence of canary percentages.
 
-If the caller chooses both the risk and the rollout shape, every release is already at full authority. SafeLane makes the operator declare the lanes and their weights in policy.yml.
-
-```mermaid
-flowchart LR
-  A["Verified evidence"] --> B["Risk"]
-  B --> C["Lane"]
-  C --> D["Weight envelope"]
-  D --> E["Next allowed step"]
-```
-
-| Lane | Weights |
+| Lane | Steps |
 | --- | --- |
-| fast | 50 → 100 |
-| standard | 25 → 50 → 100 |
-| guarded | 25 → 50 → 75 → 100 |
+| `fast` | 50% → health → 100% |
+| `standard` | 25% → health → 50% → health → 100% |
+| `guarded` | 25% → health → 50% → health → 75% → health → 100% |
 
-The current mapping is low → fast, medium → standard, and high → guarded. default_lane is guarded. Mandatory evidence is a merged commit on the default branch, a passing publish workflow, and an immutable GHCR digest.
+SafeLane maps its internal assessment result to one lane. The agent cannot create new percentages during a release.
 
-## Why weights are policy data
+At each pause, SafeLane waits for a new successful result from the configured background AnalysisRun. Missing measurements do not count as success.
 
-The agent knows what it wants to do next. It does not know what the operator permits next. Keeping weights in the lane makes each progression request a policy operation, not a free-form promotion command.
+You can edit the `policy` block in `safelane.yml`. Each lane must:
 
-## Why the default is the narrowest lane
+- use increasing percentages;
+- end at 100;
+- have a valid risk mapping.
 
-Unknown evidence must not turn into the widest rollout. SafeLane chooses the narrowest configured lane as the ceiling for situations the policy does not describe. Eligibility still decides whether the release can enter rollout.
+Replica-based percentages are approximate unless the application has a traffic router.
 
-## Next
-
-- [Assessment](./assessment/)
-- [Configuration File Schemas](../reference/configuration/)
-- [Running a Release End to End](../guides/release-end-to-end/)
-
+Next: [Configuration](../reference/configuration/) and [assessment](./assessment/).

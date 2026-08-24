@@ -1,31 +1,17 @@
 ---
 title: Exit Codes
-description: Stable exit codes for humans and agents.
+description: Process outcomes for direct CLI use.
 ---
 
-## An agent must distinguish refusal from uncertainty
-
-SafeLane uses four exit codes. Branch on the code before parsing prose.
-
-| Code | Name | Meaning |
+| Code | Meaning | Action |
 | ---: | --- | --- |
-| 0 | ExitOK | The command succeeded. |
-| 1 | ExitFail | The command ran and reported a failure, such as rejected evidence or a refusal. |
-| 2 | ExitUsage | The invocation is wrong: unknown command, missing release ID, or malformed flags. |
-| 3 | ExitTimeout | A rollout promotion was sent, but its outcome is unknown. Read status. Do not retry. |
+| `0` | The command completed. | Use the returned state. |
+| `1` | The operation failed. | Report the reason and stop. |
+| `2` | The command or input is not valid. | Correct the input. |
+| `3` | The mutation outcome is unknown. | Run `safelane status <env>`. |
 
-    0 → continue
-    1 → report and stop
-    2 → fix the invocation
-    3 → run safelane release status <id>; do not retry advance
+Do not repeat a mutation after code `3`. Argo can accept a change before a connection fails.
 
-## Why timeout is not failure
+A **wait** recommendation is a command result. It is not an invented failure or risk level.
 
-If SafeLane times out while waiting for Argo, the promotion may already have taken effect. Calling advance again can create a second promotion. Code 3 forces a status read first.
-
-## Next
-
-- [Installing the Agent Skill](../guides/agent-skill/)
-- [Handling a Paused or Aborted Rollout](../guides/rollout-recovery/)
-- [CLI Command Reference](./cli/)
-
+Next: [CLI](./cli/).

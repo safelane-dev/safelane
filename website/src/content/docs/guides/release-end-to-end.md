@@ -1,35 +1,36 @@
 ---
-title: Running a Release End to End
-description: The complete plan, run, and proof workflow.
+title: Run a Release
+description: Assess, approve, and monitor one release.
 ---
 
-## A rollout command is too late to discover a bad release
+## 1. Request
 
-Start with the release identity. SafeLane does the checking before it touches Argo.
+From the registered application repository, ask:
 
-```mermaid
-flowchart LR
-  A["doctor"] --> B["release plan --pr N"]
-  B --> C["one Safety Contract approval"]
-  C --> D["release run ID"]
-  D -->|reconcile and progress| D
-  D --> E["release proof ID"]
-```
+> Deploy payments-api to production.
 
-    safelane doctor
-    safelane release plan --pr 42 --json
-    safelane release run rel_...
-    safelane release proof rel_... --details
+Name a source revision only when you do not want the current default-branch head.
 
-Plan verifies the exact merged commit, required checks, and immutable GHCR digest, then freezes the Safety Contract without changing Kubernetes. Run asks once, applies the Rendered Manifest Bundle through the controller identity, and remains attached while it reconciles Argo and requests each policy-authorized progression. Proof joins artifact, assessment, decision, execution, boundary, and outcome data.
+## 2. Check
 
-## Why run needs no target weight
+SafeLane checks CI, the OCI image, the running version, the target Rollout, and health analysis.
 
-The frozen lane owns every allowed weight. `release run` derives the next progression from that envelope; callers cannot select a target that bypasses the recorded decision. Use `--step` only when you explicitly want at most one authorized progression instead of the default terminal loop.
+The release stops if a required fact is not valid. SafeLane does not use an older green candidate.
 
-## Next
+## 3. Review
 
-- [Handling a Paused or Aborted Rollout](./rollout-recovery/)
-- [The Release Record & Proof](../concepts/record-and-proof/)
-- [Installing the Agent Skill](./agent-skill/)
+A **proceed** recommendation shows the evidence, hazards, health checks, and rollout percentages.
 
+A **wait** recommendation shows the blocking concern and one next action.
+
+## 4. Approve
+
+Approve the final release question. SafeLane checks all material facts again. It then changes only the selected image and canary steps.
+
+## 5. Monitor
+
+SafeLane waits for a new successful health result at each pause. Argo controls abort and rollback.
+
+You can ask SafeLane to show status, hold, continue, stop, or show proof.
+
+Next: [Monitor and control](./rollout-recovery/).

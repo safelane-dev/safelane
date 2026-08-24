@@ -1,38 +1,40 @@
 ---
-title: Handling a Paused or Aborted Rollout
-description: Inspect status, pause a rollout, or abort it with a recorded reason.
+title: Monitor & Control
+description: Show status or control an active release.
 ---
 
-## A paused rollout is not permission to guess
+SafeLane reads the Rollout before it reports status. The observed Rollout is the source of truth.
 
-Argo can pause at a canary gate. A timeout can leave the outcome unknown. Retrying blindly can send a second promotion after the first one already took effect.
+## Show status
 
-```mermaid
-flowchart LR
-  A["release run ID"] --> B{"Outcome?"}
-  B -->|timeout / unknown| C["release status ID"]
-  B -->|human decision| D["accept risk or emergency control"]
-  B -->|Argo analysis failure| E["Argo abort and rollback"]
-  C --> F["release run ID reconciles first"]
-  D --> F
-  E --> G["release proof ID"]
+```bash
+safelane status production
 ```
 
-    safelane release status rel_...
-    safelane release status rel_... --json
-    safelane release pause rel_... --reason "investigating an external incident"
-    safelane release resume rel_... --reason "incident cleared"
-    safelane release abort rel_... --reason "operator emergency stop"
+The result shows the current exposure and the next health gate.
 
-Argo owns normal analysis failure, abort, and rollback. `release abort` is a separate emergency-control path; SafeLane records its caller, time, and reason without confusing it with `argo_abort`.
+## Hold
 
-## Why timeout returns exit code 3
+```bash
+safelane hold production "waiting for on-call"
+```
 
-A timeout means SafeLane does not know whether the last mutation took effect. That is different from failure. Read status, then reconnect with `release run`; it reconciles before it requests another progression.
+Hold prevents more progression. It does not change exposure.
 
-## Next
+## Continue
 
-- [Exit Codes](../reference/exit-codes/)
-- [CLI Command Reference](../reference/cli/)
-- [The Boundary](../concepts/boundary/)
+```bash
+safelane continue production "on-call is ready"
+```
 
+SafeLane continues from the observed Argo state.
+
+## Stop
+
+```bash
+safelane stop production "customers report errors"
+```
+
+SafeLane asks Argo to abort and restore the stable version. A retry is a new release with new approval.
+
+Next: [History and proof](../concepts/record-and-proof/).

@@ -1,50 +1,38 @@
 ---
 title: Installation
-description: Install a checksummed SafeLane release on Windows, macOS, or Linux.
+description: Install SafeLane and its agent skill.
 ---
 
-## A release gate is only useful if the binary is the one you can inspect
+## macOS and Linux
 
-SafeLane's installers download a precompiled binary from the latest GitHub Release and
-verify its SHA-256 checksum before replacing an existing installation. Go is not required.
+```bash
+curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
+```
 
-### macOS and Linux
+## Windows PowerShell
 
-    curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
+```powershell
+irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
+```
 
-The binary is installed to `~/.local/bin/safelane`. The SafeLane skill is installed for
-Claude and Codex under `~/.claude/skills/` and `~/.agents/skills/`. If the binary
-directory is not already on `PATH`, the installer prints the exact follow-up required.
+Restart Claude or Codex. The restart loads the SafeLane skill.
 
-### Windows PowerShell
+Then verify the installation:
 
-    irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
+```bash
+safelane version
+```
 
-The binary is installed to `%LOCALAPPDATA%\SafeLane\bin\safelane.exe`, and the skill is
-installed under `%USERPROFILE%\.claude\skills\` and `%USERPROFILE%\.agents\skills\`.
-The installer adds the binary directory to the beginning of the user `PATH`; restart
-the terminal and agent session after the first installation.
+## Build from source
 
-Rerun the same installer command to upgrade. Both installers reuse the same canonical
-path, so upgrades do not leave a second active copy behind.
+SafeLane requires Go 1.26.5 or a later version.
 
-To inspect a script before running it, open
-[`install.sh`](https://github.com/AndrewMaged814/SafeLane/blob/main/docs/install.sh) or
-[`install.ps1`](https://github.com/AndrewMaged814/SafeLane/blob/main/docs/install.ps1).
+```bash
+git clone https://github.com/AndrewMaged814/safelane.git
+cd safelane
+go build -o ./bin/safelane ./cmd/safelane
+./bin/safelane version
+go test ./...
+```
 
-### Build from source
-
-Building requires Go 1.26.5 or later.
-
-    git clone https://github.com/AndrewMaged814/safelane.git
-    cd safelane
-    go build -o ./bin/safelane ./cmd/safelane
-    ./bin/safelane version
-    go test ./...
-
-## Next
-
-- [Setting Up an Application](../guides/setting-up/)
-- [Installing the Agent Skill](../guides/agent-skill/)
-- [CLI Command Reference](../reference/cli/)
-
+Next: [Check compatibility](../../reference/compatibility/) and [register an application](../../guides/setting-up/).

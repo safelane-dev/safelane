@@ -1,64 +1,44 @@
 <p align="center">
-  <img src="assets/brand/safelane-logo.png" alt="SafeLane" width="680">
+  <img src="assets/brand/safelane-mark-2026.png" alt="SafeLane" width="190">
 </p>
 
-# SafeLane
+<h1 align="center">SafeLane</h1>
 
-<p align="center"><strong>Stop shipping every change the same way.</strong></p>
+<p align="center"><strong>Autonomous progressive delivery for coding agents.</strong></p>
 
-SafeLane is release coordination for coding agents. Give it an exact merged pull request once; it turns code and CI evidence into a frozen Safety Contract, asks for one approval, then coordinates Argo Rollouts until the release is promoted, rolled back, or needs one specific human decision.
+<p align="center">Approve once. SafeLane checks the exact release and coordinates your existing Argo Rollout to completion or a safe stop.</p>
 
-## Why use it
+<p align="center">
+  <a href="https://github.com/AndrewMaged814/safelane/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/AndrewMaged814/safelane/ci.yml?branch=main&style=flat-square&label=ci"></a>
+  <a href="https://andrewmaged814.github.io/safelane/"><img alt="Documentation" src="https://img.shields.io/badge/docs-read-f05a40?style=flat-square"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-171922?style=flat-square"></a>
+</p>
 
-Deployment agents are good at operating tools but inconsistent at release discipline. They rediscover the latest PR, choose ad-hoc rollout steps, check generic health endpoints, and return for approval at every gate.
+SafeLane gives coding agents a controlled release path. It checks the candidate, CI result, OCI image, running version, complete change, target, and health analysis.
 
-SafeLane supplies the missing release loop:
+It then recommends **proceed** or **wait**. After one exact approval, SafeLane changes the image and canary steps. Argo controls health, abort, and rollback.
+
+<p align="center">
+  <img src="assets/docs/recommendation-example.png" alt="SafeLane recommends a 50 to 100 percent rollout and asks for one approval." width="900">
+</p>
+
+## Why SafeLane
+
+- **Exact release.** Source, CI, OCI artifact, and running baseline agree.
+- **Clear recommendation.** See the hazards, health checks, and rollout steps.
+- **One approval.** Approval applies to one candidate, target, and patch.
+- **Complete outcome.** SafeLane follows Argo and stores release proof.
+
+## Use SafeLane
+
+From an application repository, ask Claude or Codex:
 
 ```text
-merged PR
-   │
-   ▼
-Safety Contract ── artifact + hazards + concrete canary assertions + authority
-   │ one approval
-   ▼
-SafeLane coordinates ──► Argo executes analysis and traffic mechanics
-   │
-   └──────────── durable Release Proof
+Register this application in production.
+Deploy payments-api to production.
 ```
 
-- Deterministic setup never launches a hidden Claude or Codex process.
-- Semantic assessment can identify cited hazards, but cannot choose weights or operations.
-- Model outages select a recorded guarded fallback; they do not invent confidence.
-- Runtime analysis exercises the canary-only `/api/demo` behavior and verifies its commit, not a hard-coded “healthy” URL.
-- Argo owns analysis failure, abort, and rollback. SafeLane reconciles and proves what happened.
-- `release run` stays attached and progresses within approved authority—no gate-by-gate babysitting.
-
-## Workflow
-
-```bash
-safelane setup
-safelane doctor
-safelane release plan --pr 42
-safelane release run rel_...
-safelane release proof rel_...
-```
-
-For a local environment, provision the cluster yourself. SafeLane does not manage
-clusters: it verifies, decides, renders and coordinates, and expects a reachable
-target with Argo Rollouts, a traffic router and a metrics provider already in place.
-
-## Setup with an agent
-
-Human setup is deterministic and conservative. An active Codex or Claude session can make it project-specific without SafeLane nesting another agent process:
-
-```bash
-safelane setup inspect --json
-safelane setup plan --findings - --json
-safelane setup apply setup_... --yes
-safelane doctor
-```
-
-The agent submits only evidence-backed application risk paths and semantic assertion intents. SafeLane maps those intents to executable probe assertions, adds its product safety floors, compiles and persists the exact operator configuration, and returns an immutable setup ID. One approval applies that ID; the agent never edits a SafeLane baseline, policy YAML, or Kubernetes manifest.
+SafeLane works with an existing Argo canary Rollout. It does not provision a cluster or create health checks.
 
 ## Install
 
@@ -74,17 +54,18 @@ Windows PowerShell:
 irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
 ```
 
-The release archive installs both the SafeLane binary and its canonical Claude/Codex
-skill. Restart the agent session after installing or upgrading.
+## Release boundary
 
-Build from source with Go 1.26.5 or later:
+SafeLane can change only:
 
-```bash
-go build -o ./bin/safelane ./cmd/safelane
-./bin/safelane --help
+```text
+/spec/template/spec/containers/<selected-index>/image
+/spec/strategy/canary/steps
 ```
 
-See the [documentation](https://andrewmaged814.github.io/safelane/) and [CLI reference](website/src/content/docs/reference/cli.md).
+Read the [Quick Start](https://andrewmaged814.github.io/safelane/start-here/quick-start/), [compatibility requirements](https://andrewmaged814.github.io/safelane/reference/compatibility/), or [roadmap](https://andrewmaged814.github.io/safelane/roadmap/).
+
+SafeLane began as a DevOpsDays Cairo 2026 hackathon project.
 
 ## License
 
