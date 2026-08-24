@@ -653,20 +653,24 @@ func controlledPowerShell(prefix string) bool {
 }
 
 func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
-	dir := filepath.Join("C:\\", "safe-eval")
+	dir := t.TempDir()
 	allowed := map[string]bool{"changes.txt": true, "handles.json": true}
+	pwshPath := filepath.Join(string(filepath.Separator), "opt", "microsoft", "powershell", "7", "pwsh.exe")
+	if volume := filepath.VolumeName(dir); volume != "" {
+		pwshPath = filepath.Join(volume+string(filepath.Separator), "Program Files", "PowerShell", "7", "pwsh.exe")
+	}
 	for _, read := range []string{
 		filepath.Join(dir, "changes.txt"),
-		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
-		`"C:\Program Files\PowerShell\7\pwsh.exe" -Command 'Get-Content -LiteralPath .\changes.txt'`,
-		`"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Get-Content -LiteralPath 'changes.txt'"`,
+		`pwsh.exe -Command "Get-Content -LiteralPath changes.txt"`,
+		fmt.Sprintf(`%q -Command 'Get-Content -LiteralPath changes.txt'`, pwshPath),
+		fmt.Sprintf(`%q -NoProfile -Command "Get-Content -LiteralPath 'changes.txt'"`, pwshPath),
 	} {
 		if _, ok := controlledEvidenceFile(read, dir, allowed); !ok {
 			t.Errorf("controlled read was rejected: %q", read)
 		}
 	}
 	for _, read := range []string{
-		filepath.Join("C:\\", "other", "changes.txt"),
+		filepath.Join(filepath.Dir(dir), "other", "changes.txt"),
 		`pwsh.exe -Command "Get-Content .\changes.txt; Get-ChildItem C:\\"`,
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt C:\Windows\win.ini"`,
 		"pwsh.exe -Command \"Get-Content -LiteralPath .\\changes.txt`nGet-Content C:\\Windows\\win.ini\"",
