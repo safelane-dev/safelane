@@ -28,6 +28,23 @@ if kubectl config get-contexts -o name | grep -Fxq safelane-admin; then
 else
   kubectl config use-context "${PROFILE}" >/dev/null
 fi
+
+# `minikube start` can return while the control-plane process is still
+# accepting connections.  Waiting for /readyz avoids addon callbacks failing
+# while they try to download the API OpenAPI schema (notably on Windows/Docker).
+wait_for_api() {
+  local deadline=$((SECONDS + 300))
+  echo "waiting for Kubernetes API..."
+  until kubectl get --raw=/readyz >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "Kubernetes API did not become ready within 300 seconds" >&2
+      return 1
+    fi
+    sleep "${WAIT_INTERVAL}"
+  done
+}
+wait_for_api
+
 if [ "$(kubectl auth can-i '*' '*' 2>/dev/null)" != "yes" ]; then
   echo "the selected minikube context is not cluster-admin; refusing demo setup" >&2
   exit 1

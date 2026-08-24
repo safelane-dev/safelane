@@ -132,6 +132,58 @@ EOF
   fi
 }
 
+assert_cluster_stage_waits_for_api_before_addons() {
+  local case_dir="${TEST_ROOT}/api-race" bin output state
+  bin="${case_dir}/bin"
+  output="${case_dir}/output"
+  state="${case_dir}/state"
+  mkdir -p "${bin}"
+
+  cat >"${bin}/minikube" <<'EOF'
+#!/bin/sh
+set -eu
+if [ "${1:-}" = status ]; then
+  echo Running
+elif [ "${1:-}" = addons ] && [ "${2:-}" = enable ]; then
+  [ -f "${STATE}.api-ready" ] || {
+    echo "addon enabled before Kubernetes API was ready" >&2
+    exit 1
+  }
+fi
+EOF
+  cat >"${bin}/kubectl" <<'EOF'
+#!/bin/sh
+set -eu
+case "$*" in
+  "config get-contexts -o name") echo minikube ;;
+  "config use-context minikube") ;;
+  "get --raw=/readyz")
+    if [ -f "${STATE}.api-first-read" ]; then
+      : >"${STATE}.api-ready"
+      exit 0
+    fi
+    : >"${STATE}.api-first-read"
+    exit 1
+    ;;
+  "auth can-i * *")
+    [ -f "${STATE}.api-ready" ] && echo yes || echo no
+    ;;
+  "get ingressclass nginx") exit 1 ;;
+  "get namespace ingress-nginx") ;;
+  "get deployment ingress-nginx-controller -n ingress-nginx") ;;
+  "rollout status -n ingress-nginx deploy/ingress-nginx-controller --timeout=300s") ;;
+esac
+EOF
+  chmod 755 "${bin}/minikube" "${bin}/kubectl"
+
+  if ! PATH="${bin}:${PATH}" STATE="${state}" SAFELANE_WAIT_INTERVAL=0 \
+    "${REAL_BASH}" "${ROOT_DIR}/cluster/10-cluster.sh" >"${output}" 2>&1; then
+    cat "${output}" >&2
+    echo "cluster stage touched addons before the Kubernetes API was ready" >&2
+    exit 1
+  fi
+}
+
 assert_ingress_addon_creation_is_waited_for() {
   local case_dir="${TEST_ROOT}/ingress-race" bin output state
   bin="${case_dir}/bin"
@@ -238,6 +290,7 @@ EOF
 assert_fresh_cluster_starts_before_admin_check
 assert_missing_plugin_fails_before_mutation
 assert_cluster_stage_preserves_renamed_admin_context
+assert_cluster_stage_waits_for_api_before_addons
 assert_ingress_addon_creation_is_waited_for
 assert_monitoring_uses_real_values_file
 
