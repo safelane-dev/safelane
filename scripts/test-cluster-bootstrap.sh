@@ -132,6 +132,57 @@ EOF
   fi
 }
 
+assert_ingress_addon_creation_is_waited_for() {
+  local case_dir="${TEST_ROOT}/ingress-race" bin output state
+  bin="${case_dir}/bin"
+  output="${case_dir}/output"
+  state="${case_dir}/state"
+  mkdir -p "${bin}"
+
+  cat >"${bin}/minikube" <<'EOF'
+#!/bin/sh
+if [ "${1:-}" = status ]; then
+  echo Running
+elif [ "${1:-}" = addons ] && [ "${2:-}" = enable ]; then
+  :
+fi
+EOF
+  cat >"${bin}/kubectl" <<'EOF'
+#!/bin/sh
+set -eu
+case "$*" in
+  "config get-contexts -o name") echo minikube ;;
+  "config use-context minikube") ;;
+  "auth can-i * *") echo yes ;;
+  "get namespace ingress-nginx")
+    if [ -f "${STATE}.namespace" ]; then exit 0; fi
+    : >"${STATE}.namespace"
+    exit 1
+    ;;
+  "get deployment ingress-nginx-controller -n ingress-nginx")
+    [ -f "${STATE}.namespace" ] || exit 1
+    if [ -f "${STATE}.deployment" ]; then exit 0; fi
+    : >"${STATE}.deployment"
+    exit 1
+    ;;
+  "rollout status -n ingress-nginx deploy/ingress-nginx-controller --timeout=300s")
+    [ -f "${STATE}.deployment" ] || {
+      echo "rollout checked before ingress Deployment existed" >&2
+      exit 1
+    }
+    ;;
+esac
+EOF
+  chmod 755 "${bin}/minikube" "${bin}/kubectl"
+
+  if ! PATH="${bin}:${PATH}" STATE="${state}" SAFELANE_WAIT_INTERVAL=0 \
+    "${REAL_BASH}" "${ROOT_DIR}/cluster/10-cluster.sh" >"${output}" 2>&1; then
+    cat "${output}" >&2
+    echo "cluster stage did not wait for the ingress addon resources" >&2
+    exit 1
+  fi
+}
+
 assert_monitoring_uses_real_values_file() {
   local case_dir="${TEST_ROOT}/monitoring" bin output log
   bin="${case_dir}/bin"
@@ -187,6 +238,7 @@ EOF
 assert_fresh_cluster_starts_before_admin_check
 assert_missing_plugin_fails_before_mutation
 assert_cluster_stage_preserves_renamed_admin_context
+assert_ingress_addon_creation_is_waited_for
 assert_monitoring_uses_real_values_file
 
 echo "Cluster bootstrap tests passed"

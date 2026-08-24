@@ -8,6 +8,7 @@ set -euo pipefail
 
 PROFILE="${MINIKUBE_PROFILE:-minikube}"
 ARGO_VERSION="${ARGO_ROLLOUTS_VERSION:-v1.9.1}"
+WAIT_INTERVAL="${SAFELANE_WAIT_INTERVAL:-1}"
 
 say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
@@ -40,6 +41,28 @@ if kubectl get ingressclass nginx >/dev/null 2>&1; then
 else
   minikube addons enable ingress -p "${PROFILE}"
 fi
+# `minikube addons enable` can return before the addon namespace and
+# Deployment have been submitted to the API server. Waiting on rollout status
+# immediately races that asynchronous creation and can fail with
+# `namespaces "ingress-nginx" not found` on a fresh Windows Docker cluster.
+wait_for_ingress_resources() {
+  local deadline=$((SECONDS + 300))
+  until kubectl get namespace ingress-nginx >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "ingress-nginx namespace did not appear within 300 seconds" >&2
+      return 1
+    fi
+    sleep "${WAIT_INTERVAL}"
+  done
+  until kubectl get deployment ingress-nginx-controller -n ingress-nginx >/dev/null 2>&1; do
+    if (( SECONDS >= deadline )); then
+      echo "ingress-nginx controller Deployment did not appear within 300 seconds" >&2
+      return 1
+    fi
+    sleep "${WAIT_INTERVAL}"
+  done
+}
+wait_for_ingress_resources
 kubectl rollout status -n ingress-nginx deploy/ingress-nginx-controller --timeout=300s
 
 say "Argo Rollouts ${ARGO_VERSION}"
