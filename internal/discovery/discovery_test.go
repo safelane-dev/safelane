@@ -98,6 +98,18 @@ func TestDiscoverListsRolloutsWithTheirContainers(t *testing.T) {
 	if !rollout.Artifact.Supported {
 		t.Errorf("artifact unsupported: %+v", rollout.Artifact.Reasons)
 	}
+	if len(found.RegistrationCandidates) != 1 {
+		t.Fatalf("registration candidates = %+v", found.RegistrationCandidates)
+	}
+	candidate := found.RegistrationCandidates[0]
+	if candidate.Application != "safelane-demo-api" || candidate.Container != "api" ||
+		candidate.Namespace != "safelane-demo-api" || candidate.Rollout != "safelane-demo-api" ||
+		candidate.Context != found.Context || candidate.Fingerprint != rollout.Fingerprint {
+		t.Errorf("registration candidate = %+v", candidate)
+	}
+	if candidate.Environment != "" || candidate.Impact != "" {
+		t.Errorf("user answers were invented: %+v", candidate)
+	}
 }
 
 // The context is reported so a person can see which cluster answered. Nothing

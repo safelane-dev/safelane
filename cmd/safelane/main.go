@@ -163,7 +163,7 @@ func confirmBuildCommand(rt commandRuntime) *cobra.Command {
 		Args:   cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return exit(cli.ConfirmBuild(cmd.Context(), cli.ConfirmBuildOptions{
-				Inspect: rt.readers(args[0], "", jsonFlag(cmd)), RunID: args[1],
+				Inspect: rt.readers(cmd.Context(), args[0], "", jsonFlag(cmd)), RunID: args[1],
 			}, rt.stdout, rt.stderr))
 		},
 	})
@@ -184,7 +184,7 @@ func confirmBaselineCommand(rt commandRuntime) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			source := &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")}
+			source := &githubverify.Client{Token: githubverify.Token(cmd.Context())}
 			return exit(cli.ConfirmBaseline(cmd.Context(), cli.ConfirmBaselineOptions{
 				Root: rt.root, Home: home, Environment: args[0], Revision: args[1], App: rt.app,
 				ForceJSON: jsonFlag(cmd), Cluster: discovery.Service{},
@@ -222,7 +222,7 @@ func approveCommand(rt commandRuntime) *cobra.Command {
 // readers builds the three production ports. They are values on the options
 // struct rather than globals, so a test substitutes any of them without a
 // build tag.
-func (rt commandRuntime) readers(environment, revision string, forceJSON bool) cli.InspectOptions {
+func (rt commandRuntime) readers(ctx context.Context, environment, revision string, forceJSON bool) cli.InspectOptions {
 	home, _ := config.Home()
 	return cli.InspectOptions{
 		Root:        rt.root,
@@ -232,7 +232,7 @@ func (rt commandRuntime) readers(environment, revision string, forceJSON bool) c
 		App:         rt.app,
 		ForceJSON:   forceJSON,
 		Cluster:     discovery.Service{},
-		Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
+		Source:      &githubverify.Client{Token: githubverify.Token(ctx)},
 		Registry:    oci.Resolver{Registry: oci.Remote{}},
 		History: func(application, environment string) ([]delta.HistoryCard, error) {
 			dir := config.ForApp(home, application).ForEnvironment(environment).Dir
@@ -342,7 +342,7 @@ func inspectCommand(rt commandRuntime) *cobra.Command {
 				revision = args[1]
 			}
 			return exit(cli.Inspect(cmd.Context(),
-				rt.readers(args[0], revision, jsonFlag(cmd)), rt.stdout, rt.stderr))
+				rt.readers(cmd.Context(), args[0], revision, jsonFlag(cmd)), rt.stdout, rt.stderr))
 		},
 	})
 }
@@ -357,7 +357,7 @@ func recommendCommand(rt commandRuntime) *cobra.Command {
 		Args:  cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return exit(cli.Recommend(cmd.Context(), cli.RecommendOptions{
-				Inspect:        rt.readers(args[0], "", jsonFlag(cmd)),
+				Inspect:        rt.readers(cmd.Context(), args[0], "", jsonFlag(cmd)),
 				AssessmentPath: args[1],
 				Stdin:          os.Stdin,
 			}, rt.stdout, rt.stderr))
@@ -372,7 +372,7 @@ func runCommand(rt commandRuntime) *cobra.Command {
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return exit(cli.Run(cmd.Context(), cli.RunOptions{
-				Inspect: rt.readers(args[0], "", jsonFlag(cmd)),
+				Inspect: rt.readers(cmd.Context(), args[0], "", jsonFlag(cmd)),
 				Confirm: os.Stdin,
 			}, rt.stdout, rt.stderr))
 		},

@@ -37,6 +37,9 @@ type Discovery struct {
 	Repository string `json:"repository,omitempty"`
 	// Rollouts is every readable Rollout in the namespace, in name order.
 	Rollouts []Rollout `json:"rollouts"`
+	// RegistrationCandidates are copy-ready selections derived from supported
+	// Rollouts. The agent supplies only the Environment name and impact.
+	RegistrationCandidates []Selection `json:"registration_candidates,omitempty"`
 }
 
 // Rollout is one Rollout as it appeared in the namespace listing.
@@ -227,6 +230,20 @@ func (s Service) Discover(ctx context.Context, root, namespace string) (Discover
 		found.Rollouts = append(found.Rollouts, rollout)
 	}
 	sort.Slice(found.Rollouts, func(i, j int) bool { return found.Rollouts[i].Name < found.Rollouts[j].Name })
+	if found.Repository != "" {
+		for _, rollout := range found.Rollouts {
+			if !rollout.Environment.Supported || rollout.Fingerprint == "" {
+				continue
+			}
+			for _, container := range rollout.Containers {
+				found.RegistrationCandidates = append(found.RegistrationCandidates, Selection{
+					Application: rollout.Name,
+					Context:     current, Namespace: namespace, Rollout: rollout.Name,
+					Container: container.Name, Fingerprint: rollout.Fingerprint,
+				})
+			}
+		}
+	}
 	return found, nil
 }
 

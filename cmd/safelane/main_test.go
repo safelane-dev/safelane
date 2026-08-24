@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,7 +22,7 @@ func TestProductionReadersLoadCompactEnvironmentHistory(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "history.jsonl"), []byte(line+"\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	readers := (commandRuntime{}).readers("production", "", false)
+	readers := (commandRuntime{}).readers(context.Background(), "production", "", false)
 	cards, err := readers.History("payments-api", "production")
 	if err != nil || len(cards) != 1 || cards[0].Lane != "fast" || cards[0].Note != "bounded change" {
 		t.Fatalf("history = %+v, %v", cards, err)

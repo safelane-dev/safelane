@@ -16,13 +16,20 @@ the active work as "this release."
 
 ## Register
 
-1. Get the namespace from the user or repository context. Run
+Run every SafeLane command from the Application repository root. Keep that
+working directory for discovery, preview, apply, assessment, and rollout
+commands. A selection file may live elsewhere; pass its absolute path.
+
+1. Get the namespace from the user or repository context. From the repository
+   root, run
    `safelane discover <namespace>`.
 2. Show the matching context, Rollout, containers, and background analysis.
    If the target or container is ambiguous, ask one selection question. Ask
    for the Environment name and its impact: low, significant, or critical.
-3. Build the selection only from discovery output, including its fingerprint.
-   Run `safelane register <selection-json-path|->`. This is a read-only preview.
+3. Copy exactly one object from `registration_candidates`. Set only its empty
+   `environment` and `impact` fields from the user's answers. Do not reconstruct
+   the object or add fields. Run `safelane register <selection-json-path|->`.
+   This is a read-only preview.
 4. Show the complete proposed `safelane.yml`. Ask whether to write that exact
    registration.
 5. After a direct approval, run
@@ -70,6 +77,13 @@ Do not load detailed evidence merely because it exists. SafeLane does not
 expose arbitrary raw source; use the changed paths and commit range in the
 changes view, and ask one material question when those facts are insufficient.
 
+The frozen Delta is the assessment evidence boundary. Raw repository,
+Kubernetes, registry, and CI inspection are outside an assessment because
+their results cannot be cited in the frozen Delta. Use only changes,
+deployment, health, history, and explicitly loaded evidence handles. When
+these do not establish a material fact, ask one focused question or retain the
+uncertainty.
+
 Build a small frontier of unresolved deployment questions:
 
 1. Identify credible hazards that can materialize because this candidate
@@ -78,12 +92,16 @@ Build a small frontier of unresolved deployment questions:
    question by themselves.
 2. For each hazard, state its preconditions, consequence, and whether the
    configured health analysis can detect it.
-3. Use available read-only repository or evidence tools for a named question
-   before asking the user. Investigate only what can affect this deployment.
+3. Load a listed evidence handle only when it can answer a named deployment
+   question. Otherwise use the frozen views or ask the user.
 4. Ask one plain question only when a material fact is unavailable. Say what
    is missing and why it matters. Accept "I don't know," keep the uncertainty,
    and do not repeat the question.
 5. Stop when the recommendation is supportable. Zero questions is normal.
+
+A merely possible failure mode is not a finding. When its material precondition
+is neither frozen evidence nor a user-supplied fact, ask only if the answer can
+change the recommendation; otherwise omit it.
 
 Do not perform a general code, style, or security review. Diff size,
 Environment impact, authorship, and file paths are context, not automatic risk
@@ -135,7 +153,9 @@ Omit unused optional fields. `provided_evidence`, when needed, is an array of
 objects with exactly `kind`, `value`, `source`, `at`, `candidate`, and
 `environment`.
 
-If validation asks for a correction, correct the cited structure once. If the
+If validation rejects a claim's evidence, remove the unsupported claim or
+rewrite it to say only what accepted evidence establishes. Never make the
+same claim appear grounded by changing only its citation. Correct once; if the
 assessment remains ungrounded, recommend waiting.
 
 ## Approve and run

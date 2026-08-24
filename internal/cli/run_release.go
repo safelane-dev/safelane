@@ -221,40 +221,45 @@ func (o RunOptions) now() time.Time {
 	return time.Now().UTC()
 }
 
-// currentFacts re-reads the material facts. It goes back to the cluster and the
-// registry rather than trusting anything cached, because the point of a recheck
-// is to catch what moved while nobody was looking.
+// currentFacts re-reads only facts that can move after approval. Source, CI,
+// and candidate artifact evidence were frozen during assessment; repeating
+// that investigation here adds failure modes without changing the exact image
+// the approved patch applies.
 func currentFacts(ctx context.Context, opts RunOptions, cfg config.Config,
 	application string, environment config.Environment, pending releasepatch.Pending) (releasepatch.Facts, error) {
-
-	frozen, _, err := FreezeDelta(ctx, opts.Inspect)
-	if err != nil {
-		return releasepatch.Facts{}, err
-	}
 	target, err := opts.Inspect.Cluster.Inspect(ctx, opts.Inspect.Root,
 		environment.Kubernetes.Namespace, environment.Kubernetes.Rollout)
 	if err != nil {
 		return releasepatch.Facts{}, err
 	}
-	container, _ := target.SelectedContainer(cfg.Artifact.Container)
+	container, found := target.SelectedContainer(cfg.Artifact.Container)
+	if !found {
+		return releasepatch.Facts{}, release.Invalid("container_not_found", "artifact.container",
+			fmt.Sprintf("Rollout %q no longer has a container called %q", target.Rollout, cfg.Artifact.Container),
+			"Register this application again to pick up the change.")
+	}
 
 	// Rebuilt with the lane a person actually approved, not with the default
 	// the evidence was frozen against. Comparing the approved patch with a
 	// patch for a different lane would cancel every approval.
 	patch, err := releasepatch.Build(target.RolloutJSON, cfg.Artifact.Container,
-		frozen.Deployment().Patch.Image, pending.Lane, cfg.ReleaseSettings.Lanes[pending.Lane].Weights)
+		pending.Patch.CandidateImage, pending.Lane, cfg.ReleaseSettings.Lanes[pending.Lane].Weights)
 	if err != nil {
 		return releasepatch.Facts{}, err
 	}
+	digest := ""
+	if at := strings.LastIndex(pending.Patch.CandidateImage, "@"); at >= 0 {
+		digest = pending.Patch.CandidateImage[at+1:]
+	}
 	return releasepatch.Facts{
-		Revision:        frozen.Candidate().Revision,
-		Digest:          frozen.Candidate().Digest,
+		Revision:        pending.Revision,
+		Digest:          digest,
 		RunningImage:    container.Image,
 		ConfigHash:      ConfigHash(opts.Inspect.Home, application),
 		RolloutUID:      patch.RolloutUID,
 		ResourceVersion: patch.ResourceVersion,
 		PatchDigest:     patch.Digest(),
-		AnalysisDigest:  delta.HealthDigest(frozen.Health()),
+		AnalysisDigest:  delta.HealthDigest(healthFrom(target)),
 	}, nil
 }
 

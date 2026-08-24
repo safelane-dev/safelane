@@ -11,6 +11,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/journal"
 	"github.com/AndrewMaged814/safelane/internal/releasepatch"
+	"github.com/AndrewMaged814/safelane/internal/verify/oci"
 )
 
 // recommended runs a proceeding recommendation so there is something awaiting
@@ -132,6 +133,27 @@ func TestAgentApprovalBindsThePendingRecommendationBeforeRun(t *testing.T) {
 	}
 	if applied != 1 {
 		t.Errorf("applied %d times", applied)
+	}
+}
+
+// Assessment already froze source, CI, and artifact evidence. Immediately
+// before mutation, run rechecks only facts that can still move: the live
+// Rollout, its analysis, the running image, and local release settings.
+func TestApprovedRunDoesNotRepeatAssessmentEvidenceReads(t *testing.T) {
+	opts := recommended(t)
+	approvePending(t, opts, "approve this")
+	opts.Source = nil
+	opts.Registry = oci.Resolver{}
+
+	applied := 0
+	run := runOptions(opts)
+	run.Coordinate = completingCoordinator(&applied)
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("run repeated assessment evidence reads: %s", stderr.String())
+	}
+	if applied != 1 {
+		t.Fatalf("applied %d times", applied)
 	}
 }
 
@@ -300,6 +322,33 @@ func TestAMaterialChangeCancelsTheApprovalAndChangesNothing(t *testing.T) {
 	}
 	if !strings.Contains(stderr.String(), "something else deployed") {
 		t.Errorf("the cancellation should say what moved: %q", stderr.String())
+	}
+}
+
+func TestRunRechecksCandidateDigestAgainstTheExactPatch(t *testing.T) {
+	opts := recommended(t)
+	pending, found, err := releasepatch.LoadPending(environmentDir(t, opts))
+	if err != nil || !found {
+		t.Fatalf("pending = %v %v", found, err)
+	}
+	pending.Facts.Digest = "sha256:" + strings.Repeat("e", 64)
+	if err := releasepatch.SavePending(environmentDir(t, opts), pending); err != nil {
+		t.Fatal(err)
+	}
+	approvePending(t, opts, "go ahead")
+
+	applied := 0
+	run := runOptions(opts)
+	run.Coordinate = completingCoordinator(&applied)
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
+		t.Fatal("run proceeded when the recorded candidate digest did not match the approved patch")
+	}
+	if applied != 0 {
+		t.Fatalf("applied %d times", applied)
+	}
+	if !strings.Contains(stderr.String(), "container being released is not the one you approved") {
+		t.Errorf("stderr = %q", stderr.String())
 	}
 }
 
