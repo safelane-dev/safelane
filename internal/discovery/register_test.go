@@ -80,7 +80,7 @@ func TestRegisterWritesTheConfigurationItObserved(t *testing.T) {
 	}
 
 	// Three lanes, compiled, not asked about.
-	if names := cfg.Policy.LaneNames(); strings.Join(names, ",") != "fast,guarded,standard" {
+	if names := cfg.ReleaseSettings.LaneNames(); strings.Join(names, ",") != "fast,guarded,standard" {
 		t.Errorf("lanes = %v", names)
 	}
 	assertOnlyReads(t, c)

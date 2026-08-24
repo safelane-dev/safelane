@@ -37,6 +37,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/delta"
@@ -151,10 +152,12 @@ type HistoryFinding struct {
 // attached to the frozen snapshot with its source and time. Conversation text,
 // drafts and tool traces are not.
 type ProvidedEvidence struct {
-	Kind   string `json:"kind"`
-	Value  string `json:"value"`
-	Source string `json:"source"`
-	At     string `json:"at"`
+	Kind        string `json:"kind"`
+	Value       string `json:"value"`
+	Source      string `json:"source"`
+	At          string `json:"at"`
+	Candidate   string `json:"candidate"`
+	Environment string `json:"environment"`
 }
 
 // Parse decodes a submitted assessment.
@@ -179,7 +182,7 @@ func Parse(raw []byte) (Recommendation, error) {
 //
 // It reports every problem at once, because a correction attempt that fixes one
 // thing and discovers the next is not a correction attempt, it is a queue.
-func Validate(r Recommendation, frozen delta.ReleaseDelta, policy config.Policy) error {
+func Validate(r Recommendation, frozen delta.ReleaseDelta, settings config.ReleaseSettings) error {
 	var errs release.Errors
 
 	if r.SnapshotID != frozen.SnapshotID() {
@@ -192,13 +195,38 @@ func Validate(r Recommendation, frozen delta.ReleaseDelta, policy config.Policy)
 	errs = append(errs, validateObservations(r, known)...)
 	errs = append(errs, validateHazards(r, known)...)
 	errs = append(errs, validateHistoryFindings(r, known)...)
-	errs = append(errs, validateDecision(r, policy)...)
+	errs = append(errs, validateProvided(r, frozen)...)
+	errs = append(errs, validateDecision(r, settings)...)
 
 	if strings.TrimSpace(r.Rationale) == "" {
 		errs = append(errs, missing("rationale", "the assessment gave no reason",
 			"Say, in one plain sentence, why this is the recommendation."))
 	}
 	return errs.OrNil()
+}
+
+func validateProvided(r Recommendation, frozen delta.ReleaseDelta) release.Errors {
+	var errs release.Errors
+	for i, provided := range r.Provided {
+		field := fmt.Sprintf("provided_evidence[%d]", i)
+		if strings.TrimSpace(provided.Kind) == "" || strings.TrimSpace(provided.Value) == "" || strings.TrimSpace(provided.Source) == "" {
+			errs = append(errs, missing(field, "a user-provided fact is incomplete",
+				"Include its kind, value, and source."))
+		}
+		if _, err := time.Parse(time.RFC3339, provided.At); err != nil {
+			errs = append(errs, release.Invalid("invalid_evidence_time", field+".at",
+				"a user-provided fact has no valid RFC3339 time", "Record when the user supplied it."))
+		}
+		if provided.Candidate != frozen.Candidate().Revision {
+			errs = append(errs, release.Invalid("wrong_evidence_candidate", field+".candidate",
+				"a user-provided fact is attached to a different candidate", "Use the candidate revision in this snapshot."))
+		}
+		if provided.Environment != frozen.Environment() {
+			errs = append(errs, release.Invalid("wrong_evidence_environment", field+".environment",
+				"a user-provided fact is attached to a different environment", "Use the environment in this snapshot."))
+		}
+	}
+	return errs
 }
 
 // knownEvidence is everything the assessment could legitimately have looked
@@ -300,7 +328,7 @@ func validateHistoryFindings(r Recommendation, known map[string]bool) release.Er
 // The assessment judges risk. The saved settings decide what each risk level is
 // worth in traffic. Letting a recommendation name any lane it liked would move
 // that decision into the assessment, quietly, one release at a time.
-func validateDecision(r Recommendation, policy config.Policy) release.Errors {
+func validateDecision(r Recommendation, settings config.ReleaseSettings) release.Errors {
 	var errs release.Errors
 
 	switch r.Risk {
@@ -313,7 +341,7 @@ func validateDecision(r Recommendation, policy config.Policy) release.Errors {
 
 	switch r.Action {
 	case ActionProceed:
-		errs = append(errs, validateProceeding(r, policy)...)
+		errs = append(errs, validateProceeding(r, settings)...)
 	case ActionWait:
 		errs = append(errs, validateWaiting(r)...)
 	default:
@@ -324,7 +352,7 @@ func validateDecision(r Recommendation, policy config.Policy) release.Errors {
 	return errs
 }
 
-func validateProceeding(r Recommendation, policy config.Policy) release.Errors {
+func validateProceeding(r Recommendation, settings config.ReleaseSettings) release.Errors {
 	var errs release.Errors
 	if r.Risk == RiskUndetermined {
 		errs = append(errs, release.Invalid("undetermined_cannot_proceed", "action",
@@ -337,13 +365,13 @@ func validateProceeding(r Recommendation, policy config.Policy) release.Errors {
 			"Name the configured lane for this risk level."))
 		return errs
 	}
-	if _, declared := policy.Lanes[r.Lane]; !declared {
+	if _, declared := settings.Lanes[r.Lane]; !declared {
 		errs = append(errs, release.Invalid("undeclared_lane", "lane",
 			fmt.Sprintf("%q is not a lane this application has configured", r.Lane),
-			"Name one of: "+strings.Join(policy.LaneNames(), ", ")+"."))
+			"Name one of: "+strings.Join(settings.LaneNames(), ", ")+"."))
 		return errs
 	}
-	if want := policy.RiskMapping[config.Risk(r.Risk)]; want != "" && want != r.Lane {
+	if want := settings.RiskMapping[config.Risk(r.Risk)]; want != "" && want != r.Lane {
 		errs = append(errs, release.Invalid("lane_does_not_match_risk", "lane",
 			fmt.Sprintf("%s risk is configured to use the %s lane, not %s", r.Risk, want, r.Lane),
 			"Use the configured lane for the risk you assessed, or assess a different risk."))

@@ -14,7 +14,7 @@ import (
 )
 
 // Discovered is everything registration observed and a person confirmed. It is
-// deliberately not a whole [Config]: registration has no opinion about policy,
+// deliberately not a whole [Config]: registration has no opinion about release settings,
 // so it cannot express one.
 type Discovered struct {
 	Application Application
@@ -23,7 +23,7 @@ type Discovered struct {
 }
 
 // Render produces the complete file for an Application that has none yet.
-func Render(d Discovered, policy Policy) []byte {
+func Render(d Discovered, settings ReleaseSettings) []byte {
 	var b strings.Builder
 	b.WriteString(renderApplication(d.Application))
 	b.WriteString("\n")
@@ -31,7 +31,7 @@ func Render(d Discovered, policy Policy) []byte {
 	b.WriteString("\n")
 	b.WriteString(renderEnvironments([]Environment{d.Environment}))
 	b.WriteString("\n")
-	b.WriteString(renderPolicy(policy))
+	b.WriteString(renderReleaseSettings(settings))
 	return []byte(b.String())
 }
 
@@ -41,7 +41,7 @@ func Render(d Discovered, policy Policy) []byte {
 // Two things are preserved, and they are the whole point of reconciling rather
 // than rewriting:
 //
-//   - the policy block is carried across byte-for-byte, comments and hand-edited
+//   - the release-settings block is carried across byte-for-byte, comments and hand-edited
 //     weights included, because discovery never had an opinion about it;
 //   - Environments are matched by name, so re-registering one leaves every
 //     other one exactly as it was.
@@ -50,7 +50,7 @@ func Render(d Discovered, policy Policy) []byte {
 // something SafeLane cannot read would mean guessing which half to keep.
 func Reconcile(existing []byte, d Discovered) ([]byte, error) {
 	if len(bytes.TrimSpace(existing)) == 0 {
-		return Render(d, DefaultPolicy()), nil
+		return Render(d, DefaultReleaseSettings()), nil
 	}
 	current, err := Parse(existing)
 	if err != nil {
@@ -138,7 +138,7 @@ func Write(path string, next []byte) (changed bool, err error) {
 	return true, nil
 }
 
-// policyBlockOf returns the existing policy block exactly as it was written.
+// policyBlockOf returns the serialized release-settings block exactly as it was written.
 //
 // The node tree locates it - which line the `policy:` key is on, and which line
 // the next top-level key starts - and the bytes between those lines are copied
@@ -215,7 +215,7 @@ func renderEnvironments(environments []Environment) string {
 	return b.String()
 }
 
-func renderPolicy(p Policy) string {
+func renderReleaseSettings(p ReleaseSettings) string {
 	var b strings.Builder
 	b.WriteString("policy:\n")
 	b.WriteString("  default_lane: " + scalar(p.DefaultLane) + "\n")
@@ -235,7 +235,7 @@ func renderPolicy(p Policy) string {
 // first, then medium, then high - falling back to alphabetical for any lane
 // nothing maps to. Read top to bottom the file then goes from the widest lane
 // to the most cautious one, which is the order a person thinks about them in.
-func laneOrder(p Policy) []string {
+func laneOrder(p ReleaseSettings) []string {
 	seen := make(map[string]bool, len(p.Lanes))
 	order := make([]string, 0, len(p.Lanes))
 	for _, risk := range Risks {

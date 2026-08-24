@@ -43,10 +43,10 @@ type Outcome struct {
 // nobody understood is still a rollout of a change nobody understood - it just
 // takes longer to find out, with the same code in front of real users. Waiting
 // is the honest answer, and it is the one a person can act on.
-func Resolve(raw []byte, frozen delta.ReleaseDelta, policy config.Policy, attempt int) Outcome {
+func Resolve(raw []byte, frozen delta.ReleaseDelta, settings config.ReleaseSettings, attempt int) Outcome {
 	recommendation, err := Parse(raw)
 	if err == nil {
-		err = Validate(recommendation, frozen, policy)
+		err = Validate(recommendation, frozen, settings)
 	}
 	if err == nil && recommendation.Risk == RiskUndetermined && recommendation.Action == ActionWait {
 		// Undetermined-and-waiting is a valid, honest answer. It is not a

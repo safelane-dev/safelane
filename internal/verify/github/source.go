@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -68,6 +69,10 @@ type Comparison struct {
 	// range came through. They are not evidence about the change itself;
 	// the commits are.
 	PullRequests []PullRequestSummary `json:"pull_requests,omitempty"`
+	// Diff is the immutable raw diff for base and head. It is used only to
+	// create a content-addressed evidence handle and is not serialized into
+	// the frozen release summary.
+	Diff []byte `json:"-"`
 }
 
 // FileChange is one path in a comparison.
@@ -281,36 +286,112 @@ func (c *Client) Revision(ctx context.Context, repository, sha string) (Revision
 	return revision, nil
 }
 
+// RevisionExists implements oci.RevisionChecker without making the OCI
+// package depend on GitHub. A missing commit is a checked false; connectivity
+// and authorization failures remain errors so confirmation never guesses.
+func (c *Client) RevisionExists(ctx context.Context, repository, sha string) (bool, error) {
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		return false, err
+	}
+	var commit commitResponse
+	err = c.do(ctx, "GET", fmt.Sprintf("/repos/%s/%s/commits/%s", owner, name, url.PathEscape(sha)), &commit)
+	if err == errNotFound {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return strings.EqualFold(commit.SHA, sha), nil
+}
+
 // Compare returns the complete base...head range.
 func (c *Client) Compare(ctx context.Context, repository, base, head string) (Comparison, error) {
 	owner, name, err := splitRepository(repository)
 	if err != nil {
 		return Comparison{}, err
 	}
-	var response compareResponse
 	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, name, url.PathEscape(base), url.PathEscape(head))
-	if err := c.do(ctx, "GET", path, &response); err != nil {
+	var comparison Comparison
+	comparison.Base, comparison.Head = base, head
+	for page := 1; ; page++ {
+		var response compareResponse
+		pagePath := fmt.Sprintf("%s?per_page=100&page=%d", path, page)
+		if err := c.do(ctx, "GET", pagePath, &response); err != nil {
+			return Comparison{}, err
+		}
+		if page == 1 {
+			comparison.Status = response.Status
+			comparison.AheadBy = response.AheadBy
+			comparison.BehindBy = response.BehindBy
+			for _, file := range response.Files {
+				comparison.Files = append(comparison.Files, FileChange{
+					Path: file.Filename, Status: file.Status,
+					Additions: file.Additions, Deletions: file.Deletions,
+				})
+			}
+		}
+		for _, commit := range response.Commits {
+			comparison.Commits = append(comparison.Commits, commit.revision())
+		}
+		if len(comparison.Commits) >= comparison.AheadBy || len(response.Commits) == 0 {
+			break
+		}
+	}
+	if len(comparison.Commits) != comparison.AheadBy {
+		return Comparison{}, fmt.Errorf("github comparison is incomplete: received %d of %d commits", len(comparison.Commits), comparison.AheadBy)
+	}
+	diff, err := c.read(ctx, path, "application/vnd.github.diff")
+	if err != nil {
 		return Comparison{}, err
 	}
-
-	comparison := Comparison{
-		Base:     base,
-		Head:     head,
-		Status:   response.Status,
-		AheadBy:  response.AheadBy,
-		BehindBy: response.BehindBy,
-	}
-	for _, commit := range response.Commits {
-		comparison.Commits = append(comparison.Commits, commit.revision())
-	}
-	for _, file := range response.Files {
-		comparison.Files = append(comparison.Files, FileChange{
-			Path: file.Filename, Status: file.Status,
-			Additions: file.Additions, Deletions: file.Deletions,
-		})
+	comparison.Diff = diff
+	for _, file := range filesInDiff(diff) {
+		if !hasFile(comparison.Files, file) {
+			comparison.Files = append(comparison.Files, FileChange{
+				Path: file, Status: "changed",
+			})
+		}
 	}
 	comparison.PullRequests = pullRequestsIn(comparison.Commits)
 	return comparison, nil
+}
+
+func hasFile(files []FileChange, path string) bool {
+	for _, file := range files {
+		if file.Path == path {
+			return true
+		}
+	}
+	return false
+}
+
+func filesInDiff(diff []byte) []string {
+	var files []string
+	for _, line := range strings.Split(string(diff), "\n") {
+		if !strings.HasPrefix(line, "diff --git ") {
+			continue
+		}
+		rest := strings.TrimPrefix(line, "diff --git ")
+		marker := strings.LastIndex(rest, " b/")
+		if marker < 0 {
+			marker = strings.LastIndex(rest, " \"b/")
+		}
+		if marker < 0 {
+			continue
+		}
+		path := strings.TrimSpace(rest[marker+1:])
+		if strings.HasPrefix(path, "\"") {
+			if decoded, err := strconv.Unquote(path); err == nil {
+				path = decoded
+			}
+		}
+		path = strings.TrimPrefix(path, "b/")
+		if path != "" && !contains(files, path) {
+			files = append(files, path)
+		}
+	}
+	return files
 }
 
 // Checks reads what CI reported for one exact revision.

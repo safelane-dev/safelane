@@ -1,4 +1,5 @@
-// Command safelane coordinates a merged change through Argo Rollouts.
+// Command safelane coordinates an Application Release Candidate to an
+// Environment through Argo Rollouts.
 //
 // The command surface is decision 11's, and it is short on purpose:
 //
@@ -122,10 +123,52 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "name the application when this repository is registered as more than one")
 
 	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectCommand(rt),
-		recommendCommand(rt), approveCommand(rt), registerApplyCommand(rt), runCommand(rt))
+		recommendCommand(rt), approveCommand(rt), confirmBaselineCommand(rt), confirmBuildCommand(rt), registerApplyCommand(rt), runCommand(rt))
 	root.AddCommand(naturalControls(rt)...)
 	root.AddCommand(completionCommand(root), versionCommand())
 	return root
+}
+
+// confirmBuildCommand is the agent adapter used after the user selects one of
+// several successful exact-revision workflows listed by inspection.
+func confirmBuildCommand(rt commandRuntime) *cobra.Command {
+	cmd := withJSON(&cobra.Command{
+		Use:    "confirm-build <env> <run-id>",
+		Short:  "Record which successful workflow produced this release's container",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return exit(cli.ConfirmBuild(cmd.Context(), cli.ConfirmBuildOptions{
+				Inspect: rt.readers(args[0], "", jsonFlag(cmd)), RunID: args[1],
+			}, rt.stdout, rt.stderr))
+		},
+	})
+	return cmd
+}
+
+// confirmBaselineCommand is the agent adapter for the one-time adoption case
+// where the running image has no usable source metadata. The active session
+// first asks the user which exact commit is deployed.
+func confirmBaselineCommand(rt commandRuntime) *cobra.Command {
+	cmd := withJSON(&cobra.Command{
+		Use:    "confirm-baseline <env> <revision>",
+		Short:  "Bind the running image to the exact commit the user confirmed",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			source := &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")}
+			return exit(cli.ConfirmBaseline(cmd.Context(), cli.ConfirmBaselineOptions{
+				Root: rt.root, Home: home, Environment: args[0], Revision: args[1], App: rt.app,
+				ForceJSON: jsonFlag(cmd), Cluster: discovery.Service{},
+				Registry: oci.Resolver{Registry: oci.Remote{}}, Checker: source,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+	return cmd
 }
 
 // approveCommand is hidden because it is an adapter for the active agent

@@ -241,7 +241,7 @@ func currentFacts(ctx context.Context, opts RunOptions, cfg config.Config,
 	// the evidence was frozen against. Comparing the approved patch with a
 	// patch for a different lane would cancel every approval.
 	patch, err := releasepatch.Build(target.RolloutJSON, cfg.Artifact.Container,
-		frozen.Deployment().Patch.Image, pending.Lane, cfg.Policy.Lanes[pending.Lane].Weights)
+		frozen.Deployment().Patch.Image, pending.Lane, cfg.ReleaseSettings.Lanes[pending.Lane].Weights)
 	if err != nil {
 		return releasepatch.Facts{}, err
 	}

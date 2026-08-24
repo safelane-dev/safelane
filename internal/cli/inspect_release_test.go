@@ -162,7 +162,7 @@ func registeredHome(t *testing.T) string {
 				Context: "safelane-caller-payments-api", Namespace: "payments", Rollout: "payments-api",
 			},
 		},
-	}, config.DefaultPolicy())
+	}, config.DefaultReleaseSettings())
 	if _, err := config.Write(config.ForApp(home, "payments-api").File, file); err != nil {
 		t.Fatal(err)
 	}
@@ -211,6 +211,20 @@ func TestInspectFreezesADeltaAndReportsFourViews(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Errorf("output is missing %q:\n%s", want, out)
 		}
+	}
+}
+
+func TestInspectionContentAddressesTheCompleteRawDiff(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	source.comparison.Diff = []byte("diff --git a/internal/refunds.go b/internal/refunds.go\n+func Refund() {}\n")
+	opts.Source = source
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(frozen.Changes().Diffs) != 1 || frozen.Changes().Diffs[0].Kind != "diff" {
+		t.Fatalf("raw diff handle = %+v", frozen.Changes().Diffs)
 	}
 }
 

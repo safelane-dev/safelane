@@ -272,7 +272,7 @@ func writeRegisteredApp(t *testing.T, home, app, repository string) {
 			Impact:     config.ImpactCritical,
 			Kubernetes: config.Kubernetes{Context: "c", Namespace: "n", Rollout: app},
 		},
-	}, config.DefaultPolicy())
+	}, config.DefaultReleaseSettings())
 	if _, err := config.Write(config.ForApp(home, app).File, file); err != nil {
 		t.Fatal(err)
 	}

@@ -115,6 +115,7 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 		if record.State.Terminal() {
 			return record, nil
 		}
+		progressionStopped := hasEvent(record.Events, "analysis_failed")
 		if record.State == journal.StatePaused {
 			c.sleep()
 			continue
@@ -137,6 +138,17 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			}
 			return c.Store.Finish(record, journal.StateCompleted, "released", "", c.now())
 		case journal.StateFailed:
+			if hasEvent(record.Events, "stop") {
+				record, err = c.Store.Append(record, journal.Event{
+					At: c.now(), Kind: "restored", By: journal.ActorArgo,
+					Detail: "Argo restored the stable version after the requested stop", Weight: observed.Weight,
+				})
+				if err != nil {
+					return record, err
+				}
+				return c.Store.Finish(record, journal.StateStopped,
+					"stopped at your request; stable version restored", record.Reason, c.now())
+			}
 			record, err = c.Store.Append(record, journal.Event{
 				At: c.now(), Kind: "failed", By: journal.ActorArgo,
 				Detail: "Argo stopped the rollout and restored the stable version", Weight: observed.Weight,
@@ -155,6 +167,13 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			c.sleep()
 			continue
 		}
+		if progressionStopped {
+			// The analysis has ended progression, but only the Rollout can say
+			// restoration is complete. Stay attached without measuring again or
+			// requesting another promotion until Argo reports a terminal state.
+			c.sleep()
+			continue
+		}
 
 		measurement, err := c.Cluster.Measurement(ctx)
 		if err != nil {
@@ -163,6 +182,7 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 		gate := journal.Gate{SuccessfulAtLastGate: record.SuccessfulAtLastGate}
 		decision := gate.Decide(measurement)
 		if decision.Stop {
+			record.Reason = decision.Reason
 			record, err = c.Store.Append(record, journal.Event{
 				At: c.now(), Kind: "analysis_failed", By: decision.By,
 				Detail: decision.Reason, Weight: observed.Weight,
@@ -170,7 +190,8 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			if err != nil {
 				return record, err
 			}
-			return c.Store.Finish(record, decision.State, decision.Reason, "", c.now())
+			c.sleep()
+			continue
 		}
 		if !decision.Promote {
 			c.sleep()
@@ -188,4 +209,13 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			return record, err
 		}
 	}
+}
+
+func hasEvent(events []journal.Event, kind string) bool {
+	for _, event := range events {
+		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
 }

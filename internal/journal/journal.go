@@ -75,7 +75,17 @@ func (r Record) Status() Status {
 	return Status{
 		State: r.State, Environment: r.Environment,
 		Weight: r.Weight, Reason: r.Reason, Since: r.Ended,
+		Restoring: hasRecordEvent(r.Events, "stop"),
 	}
+}
+
+func hasRecordEvent(events []Event, kind string) bool {
+	for _, event := range events {
+		if event.Kind == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // HistoryCard is the compact form: one line per release, enough to see a

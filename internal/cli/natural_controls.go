@@ -118,11 +118,29 @@ func Status(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) 
 		if observeErr != nil {
 			return writeResultError(stderr, "status", observeErr)
 		}
-		var changed bool
-		record, correction, changed = journal.Reconcile(record, observed, opts.now())
-		if changed {
-			if err := store.Save(record); err != nil {
+		if record.Status().Restoring && observed.State == journal.StateFailed {
+			now := opts.now()
+			record, err = store.Append(record, journal.Event{
+				At: now, Kind: "restored", By: journal.ActorArgo,
+				Detail: "Argo restored the stable version after the requested stop", Weight: observed.Weight,
+			})
+			if err != nil {
 				return writeResultError(stderr, "status", err)
+			}
+			record.Weight = observed.Weight
+			record, err = store.Finish(record, journal.StateStopped,
+				"stopped at your request; stable version restored", record.Reason, now)
+			if err != nil {
+				return writeResultError(stderr, "status", err)
+			}
+			correction = "Argo finished restoring the stable version."
+		} else {
+			var changed bool
+			record, correction, changed = journal.Reconcile(record, observed, opts.now())
+			if changed {
+				if err := store.Save(record); err != nil {
+					return writeResultError(stderr, "status", err)
+				}
 			}
 		}
 	}
@@ -160,8 +178,8 @@ func Continue(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer
 
 // Stop asks Argo to abort and restore the stable version, and records why.
 func Stop(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) int {
-	return control(ctx, opts, stdout, stderr, "stop", journal.StateStopped,
-		"stopped at your request", "stopped at your request; stable version restored")
+	return control(ctx, opts, stdout, stderr, "stop", journal.StateMonitoring,
+		"stop requested; Argo is restoring the stable version", "")
 }
 
 func control(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer,

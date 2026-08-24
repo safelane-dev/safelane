@@ -142,8 +142,12 @@ type HistoryCard struct {
 // ProvidedEvidence is something the user supplied for this release: an
 // incident number, a confirmed baseline, a note about why now.
 type ProvidedEvidence struct {
-	Kind  string    `json:"kind"`
-	Value Untrusted `json:"value"`
+	Kind        string    `json:"kind"`
+	Value       Untrusted `json:"value"`
+	Source      string    `json:"source"`
+	At          time.Time `json:"at"`
+	Candidate   string    `json:"candidate"`
+	Environment string    `json:"environment"`
 }
 
 // HistoryLimit is how many cards a Delta carries. Ten is enough to see a
@@ -275,6 +279,20 @@ func (d ReleaseDelta) History() []HistoryCard {
 // Provided returns a copy of what the user supplied.
 func (d ReleaseDelta) Provided() []ProvidedEvidence {
 	return append([]ProvidedEvidence(nil), d.provided...)
+}
+
+// WithProvided attaches user-supplied deployment facts to this exact release.
+// It returns a new snapshot because evidence learned during assessment changes
+// what the final recommendation is grounded in.
+func (d ReleaseDelta) WithProvided(provided []ProvidedEvidence) ReleaseDelta {
+	next := d
+	next.changes = copyChangeSet(d.changes)
+	next.deployment = d.Deployment()
+	next.health = d.Health()
+	next.history = d.History()
+	next.provided = append(d.Provided(), provided...)
+	next.snapshotID = contentHash(next)
+	return next
 }
 
 // WithPatch returns a new Delta whose proposed patch is set.

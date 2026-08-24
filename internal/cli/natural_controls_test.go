@@ -214,13 +214,27 @@ func TestStopAbortsAndRecordsTheReason(t *testing.T) {
 	if asked != "stop" {
 		t.Errorf("argo was asked to %q", asked)
 	}
-	if !strings.Contains(stdout.String(), "Stable version restored.") {
+	if !strings.Contains(stdout.String(), "Waiting for Argo to restore the stable version.") {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 
-	// A stop ends the release, so the slot is free and the card is written.
+	// The request is not terminal proof. The release stays active until Argo
+	// reports that restoration has actually finished.
+	if active, found, err := store.Active(); err != nil || !found || active.State != journal.StateMonitoring {
+		t.Errorf("Active = %+v %v %v after a stop request", active, found, err)
+	}
+	opts.Observe = func(context.Context, config.Environment) (journal.Observed, error) {
+		return journal.Observed{State: journal.StateFailed, Weight: 0}, nil
+	}
+	stdout.Reset()
+	if code := Status(context.Background(), opts, &terminal{&stdout}, &stderr); code != ExitOK {
+		t.Fatalf("status after restore: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "Stable version restored.") {
+		t.Errorf("terminal stdout = %q", stdout.String())
+	}
 	if _, found, err := store.Active(); err != nil || found {
-		t.Errorf("Active = %v %v after a stop", found, err)
+		t.Errorf("Active = %v %v after restoration", found, err)
 	}
 	cards, err := store.History(10)
 	if err != nil {

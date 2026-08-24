@@ -110,7 +110,7 @@ func (s Service) Prepare(ctx context.Context, root, home string, selection Selec
 
 	var file []byte
 	if os.IsNotExist(readErr) {
-		file = config.Render(discovered, config.DefaultPolicy())
+		file = config.Render(discovered, config.DefaultReleaseSettings())
 	} else {
 		file, err = config.Reconcile(existing, discovered)
 		if err != nil {

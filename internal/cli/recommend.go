@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/config"
@@ -86,7 +87,7 @@ func Recommend(ctx context.Context, opts RecommendOptions, stdout, stderr io.Wri
 		attempt = opts.Attempt
 	}
 
-	outcome := assessment.Resolve(raw, frozen, cfg.Policy, attempt)
+	outcome := assessment.Resolve(raw, frozen, cfg.ReleaseSettings, attempt)
 	if outcome.Correction != nil {
 		// The failed attempt is recorded before the correction is asked for,
 		// so the second one is the second one however it arrives.
@@ -100,9 +101,21 @@ func Recommend(ctx context.Context, opts RecommendOptions, stdout, stderr io.Wri
 	}
 
 	recommendation := outcome.Recommendation
+	if len(recommendation.Provided) > 0 {
+		provided := make([]delta.ProvidedEvidence, 0, len(recommendation.Provided))
+		for _, evidence := range recommendation.Provided {
+			at, _ := time.Parse(time.RFC3339, evidence.At)
+			provided = append(provided, delta.ProvidedEvidence{
+				Kind: evidence.Kind, Value: delta.Untrusted(evidence.Value), Source: evidence.Source,
+				At: at, Candidate: evidence.Candidate, Environment: evidence.Environment,
+			})
+		}
+		frozen = frozen.WithProvided(provided)
+		recommendation.SnapshotID = frozen.SnapshotID()
+	}
 	lane := config.Lane{}
 	if recommendation.Action == assessment.ActionProceed {
-		_, lane, _ = cfg.Policy.LaneFor(config.Risk(recommendation.Risk))
+		_, lane, _ = cfg.ReleaseSettings.LaneFor(config.Risk(recommendation.Risk))
 		frozen = frozen.WithPatch(patchFor(frozen, recommendation.Lane, lane.Weights))
 		// The recommendation is about the snapshot that carries the lane it
 		// chose, so the frozen evidence and the proposal agree from here on.

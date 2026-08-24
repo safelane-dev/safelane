@@ -60,8 +60,9 @@ type Decision struct {
 func (g Gate) Decide(m Measurement) Decision {
 	switch m.Phase {
 	case "Failed", "Error", "Inconclusive":
-		// Argo's call, and Argo will restore the stable version. SafeLane
-		// records what happened and stops asking for promotions.
+		// Argo's call. SafeLane records what happened and stops asking for
+		// promotions, but the coordinator remains attached until the Rollout
+		// reports that restoration reached a terminal outcome.
 		return Decision{
 			Stop:   true,
 			State:  StateFailed,

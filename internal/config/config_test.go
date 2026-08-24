@@ -65,10 +65,10 @@ func TestParseReadsTheDocumentedShape(t *testing.T) {
 	if env.Kubernetes != want {
 		t.Errorf("kubernetes = %+v, want %+v", env.Kubernetes, want)
 	}
-	if cfg.Policy.DefaultLane != "guarded" {
-		t.Errorf("default_lane = %q", cfg.Policy.DefaultLane)
+	if cfg.ReleaseSettings.DefaultLane != "guarded" {
+		t.Errorf("default_lane = %q", cfg.ReleaseSettings.DefaultLane)
 	}
-	if got := cfg.Policy.Lanes["standard"].Weights; len(got) != 3 || got[2] != 100 {
+	if got := cfg.ReleaseSettings.Lanes["standard"].Weights; len(got) != 3 || got[2] != 100 {
 		t.Errorf("standard weights = %v", got)
 	}
 }
@@ -222,14 +222,14 @@ func TestLaneForFallsBackToTheDefaultLane(t *testing.T) {
 		t.Fatalf("Parse: %v", err)
 	}
 
-	name, lane, err := cfg.Policy.LaneFor(config.RiskLow)
+	name, lane, err := cfg.ReleaseSettings.LaneFor(config.RiskLow)
 	if err != nil || name != "fast" || len(lane.Weights) != 2 {
 		t.Fatalf("LaneFor(low) = %q, %v, %v", name, lane, err)
 	}
 
 	// No assessment at all is an expected case, and it picks the cautious lane
 	// rather than failing or widening.
-	name, lane, err = cfg.Policy.LaneFor("")
+	name, lane, err = cfg.ReleaseSettings.LaneFor("")
 	if err != nil || name != "guarded" {
 		t.Fatalf("LaneFor(\"\") = %q, %v, %v", name, lane, err)
 	}
@@ -238,12 +238,12 @@ func TestLaneForFallsBackToTheDefaultLane(t *testing.T) {
 	}
 }
 
-func TestDefaultPolicyValidates(t *testing.T) {
+func TestDefaultReleaseSettingsValidate(t *testing.T) {
 	cfg := config.Config{
-		Application:  config.Application{Name: "payments-api", Repository: "acme/payments-api"},
-		Artifact:     config.Artifact{Container: "payments-api", Image: "ghcr.io/acme/payments-api"},
-		Environments: []config.Environment{{Name: "production", Impact: config.ImpactCritical, Kubernetes: config.Kubernetes{Context: "c", Namespace: "n", Rollout: "r"}}},
-		Policy:       config.DefaultPolicy(),
+		Application:     config.Application{Name: "payments-api", Repository: "acme/payments-api"},
+		Artifact:        config.Artifact{Container: "payments-api", Image: "ghcr.io/acme/payments-api"},
+		Environments:    []config.Environment{{Name: "production", Impact: config.ImpactCritical, Kubernetes: config.Kubernetes{Context: "c", Namespace: "n", Rollout: "r"}}},
+		ReleaseSettings: config.DefaultReleaseSettings(),
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("the compiled defaults do not validate: %v", err)

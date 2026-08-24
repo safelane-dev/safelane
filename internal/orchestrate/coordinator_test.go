@@ -130,7 +130,11 @@ func TestCoordinatorNeverPromotesOnAnOldMeasurement(t *testing.T) {
 func TestCoordinatorRecordsArgoAnalysisFailureWithoutIssuingAbort(t *testing.T) {
 	store := journal.Store{Dir: t.TempDir()}
 	cluster := &cluster{
-		observed:     []journal.Observed{{State: journal.StateMonitoring, Weight: 25, AtGate: true}},
+		observed: []journal.Observed{
+			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
+			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
+			{State: journal.StateFailed, Weight: 0},
+		},
 		measurements: []journal.Measurement{{Phase: "Failed", Successful: 0, Count: 1}},
 	}
 	coordinator := orchestrate.Coordinator{Cluster: cluster, Store: store, Now: time.Now, Sleep: func(time.Duration) {}}
@@ -141,6 +145,9 @@ func TestCoordinatorRecordsArgoAnalysisFailureWithoutIssuingAbort(t *testing.T) 
 	}
 	if cluster.promoted != 0 || finished.State != journal.StateFailed {
 		t.Fatalf("promoted=%d finished=%+v", cluster.promoted, finished)
+	}
+	if len(cluster.observed) != 0 {
+		t.Fatalf("coordinator detached before Argo's terminal state: %d observations remain", len(cluster.observed))
 	}
 	if len(finished.Events) == 0 || finished.Events[len(finished.Events)-1].By != journal.ActorArgo {
 		t.Fatalf("failure attribution = %+v", finished.Events)

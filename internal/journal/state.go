@@ -67,6 +67,9 @@ type Status struct {
 	Reason string
 	// Since is when a completed release became stable.
 	Since time.Time
+	// Restoring means the user requested stop and Argo has not yet reported
+	// the terminal restored state.
+	Restoring bool
 }
 
 // Line renders Appendix A4: one sentence saying where the release is and what
@@ -85,6 +88,9 @@ func (s Status) Line() string {
 	case StateApplying:
 		return "Applying the approved image and canary steps."
 	case StateMonitoring:
+		if s.Restoring {
+			return fmt.Sprintf("Stopping at %d%%. Waiting for Argo to restore the stable version.", s.Weight)
+		}
 		return fmt.Sprintf("At %d%%. Waiting for the next health measurement.", s.Weight)
 	case StatePaused:
 		return fmt.Sprintf("Held at %d%% at your request: %q.", s.Weight, s.Reason)
@@ -112,6 +118,9 @@ func (s Status) WaitingFor() string {
 	case StateApplying:
 		return "the cluster to accept the change"
 	case StateMonitoring:
+		if s.Restoring {
+			return "Argo to restore the stable version"
+		}
 		return "a background health measurement"
 	case StatePaused:
 		return "you"

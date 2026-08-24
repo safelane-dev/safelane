@@ -28,24 +28,24 @@ func discovered() config.Discovered {
 // The file a first registration writes is the file the plan documents, to the
 // byte. This is the output contract for configuration.
 func TestRenderProducesTheDocumentedFile(t *testing.T) {
-	got := string(config.Render(discovered(), config.DefaultPolicy()))
+	got := string(config.Render(discovered(), config.DefaultReleaseSettings()))
 	if got != golden {
 		t.Errorf("Render produced:\n%s\nwant:\n%s", got, golden)
 	}
 }
 
 func TestRenderedFileParsesBack(t *testing.T) {
-	raw := config.Render(discovered(), config.DefaultPolicy())
+	raw := config.Render(discovered(), config.DefaultReleaseSettings())
 	if _, err := config.Parse(raw); err != nil {
 		t.Fatalf("SafeLane cannot read what it just wrote: %v", err)
 	}
 }
 
-// The operator owns the policy block. Reconciling brings it across exactly as
+// The saved release settings belong to the application. Reconciling brings them across exactly as
 // it was written -- hand-edited weights, comments, spacing and all -- because
 // discovery has no opinion about any of it.
-func TestReconcilePreservesThePolicyBlockByteForByte(t *testing.T) {
-	operatorPolicy := `policy:
+func TestReconcilePreservesTheReleaseSettingsByteForByte(t *testing.T) {
+	releaseSettings := `policy:
   # We ship payments slowly. Do not "simplify" this.
   default_lane: guarded
   risk_mapping:
@@ -62,15 +62,15 @@ func TestReconcilePreservesThePolicyBlockByteForByte(t *testing.T) {
         - 25
         - 100
 `
-	existing := strings.Replace(golden, golden[strings.Index(golden, "policy:"):], operatorPolicy, 1)
+	existing := strings.Replace(golden, golden[strings.Index(golden, "policy:"):], releaseSettings, 1)
 
 	next, err := config.Reconcile([]byte(existing), discovered())
 	if err != nil {
 		t.Fatalf("Reconcile: %v", err)
 	}
 	got := string(next)
-	if !strings.Contains(got, operatorPolicy) {
-		t.Errorf("the policy block was rewritten.\ngot:\n%s\nwant it to contain:\n%s", got, operatorPolicy)
+	if !strings.Contains(got, releaseSettings) {
+		t.Errorf("the release-settings block was rewritten.\ngot:\n%s\nwant it to contain:\n%s", got, releaseSettings)
 	}
 }
 

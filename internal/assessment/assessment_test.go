@@ -77,16 +77,30 @@ func waiting(t *testing.T) assessment.Recommendation {
 	}
 }
 
-func policy() config.Policy { return config.DefaultPolicy() }
+func releaseSettings() config.ReleaseSettings { return config.DefaultReleaseSettings() }
 
 func TestAWellGroundedProceedingResultIsAccepted(t *testing.T) {
-	if err := assessment.Validate(proceeding(t), frozen(t), policy()); err != nil {
+	if err := assessment.Validate(proceeding(t), frozen(t), releaseSettings()); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
 
+func TestUserProvidedEvidenceIsBoundToThisCandidateAndEnvironment(t *testing.T) {
+	f := frozen(t)
+	r := proceeding(t)
+	r.Provided = []assessment.ProvidedEvidence{{
+		Kind: "deployment fact", Value: "the migration already ran", Source: "user confirmation",
+		At: "2026-08-21T12:05:00Z", Candidate: f.Candidate().Revision, Environment: f.Environment(),
+	}}
+	if err := assessment.Validate(r, f, releaseSettings()); err != nil {
+		t.Fatalf("valid provided evidence: %v", err)
+	}
+	r.Provided[0].Candidate = strings.Repeat("b", 40)
+	assertRejection(t, assessment.Validate(r, f, releaseSettings()), "wrong_evidence_candidate")
+}
+
 func TestAWellGroundedWaitingResultIsAccepted(t *testing.T) {
-	if err := assessment.Validate(waiting(t), frozen(t), policy()); err != nil {
+	if err := assessment.Validate(waiting(t), frozen(t), releaseSettings()); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
@@ -96,14 +110,14 @@ func TestAWellGroundedWaitingResultIsAccepted(t *testing.T) {
 func TestAnAssessmentOfAnotherSnapshotIsRefused(t *testing.T) {
 	r := proceeding(t)
 	r.SnapshotID = "sha256:" + strings.Repeat("f", 64)
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "wrong_snapshot")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "wrong_snapshot")
 }
 
 // An observation with no citation is an opinion, and opinions do not ship.
 func TestAnObservationMustCiteEvidence(t *testing.T) {
 	r := proceeding(t)
 	r.Observations[0].Evidence = nil
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "incomplete_assessment")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "incomplete_assessment")
 }
 
 // A cited handle that does not exist means the reasoning was not grounded in
@@ -112,7 +126,7 @@ func TestAnObservationMustCiteEvidence(t *testing.T) {
 func TestCitingEvidenceThatDoesNotExistIsRefused(t *testing.T) {
 	r := proceeding(t)
 	r.Observations[0].Evidence = []string{"diff:sha256:" + strings.Repeat("0", 64)}
-	err := assessment.Validate(r, frozen(t), policy())
+	err := assessment.Validate(r, frozen(t), releaseSettings())
 	assertRejection(t, err, "unknown_evidence")
 	// The refusal lists what could have been cited.
 	assertRemedy(t, err, "changes")
@@ -126,7 +140,7 @@ func TestTheFourViewsAndTheDeltasHandlesAreValidCitations(t *testing.T) {
 		Statement: "The diff adds one function.",
 		Evidence:  []string{f.Handles()[0].ID},
 	})
-	if err := assessment.Validate(r, f, policy()); err != nil {
+	if err := assessment.Validate(r, f, releaseSettings()); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 }
@@ -142,7 +156,7 @@ func TestAHazardMustSayWhatHasToBeTrueAndWhatHappens(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			r := waiting(t)
 			mutate(&r.Hazards[0])
-			assertRejection(t, assessment.Validate(r, frozen(t), policy()), "incomplete_assessment")
+			assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "incomplete_assessment")
 		})
 	}
 }
@@ -157,14 +171,14 @@ func TestTheFourCoverageStatesAreAccepted(t *testing.T) {
 	} {
 		r := waiting(t)
 		r.Hazards[0].Coverage.Status = status
-		if err := assessment.Validate(r, frozen(t), policy()); err != nil {
+		if err := assessment.Validate(r, frozen(t), releaseSettings()); err != nil {
 			t.Errorf("coverage %q was refused: %v", status, err)
 		}
 	}
 
 	r := waiting(t)
 	r.Hazards[0].Coverage.Status = "probably_fine"
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "invalid_coverage")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "invalid_coverage")
 }
 
 // The assessment judges risk; the operator decides what each risk level is
@@ -174,7 +188,7 @@ func TestAProceedingResultMustUseTheConfiguredLaneForItsRisk(t *testing.T) {
 	r := proceeding(t)
 	r.Risk = assessment.RiskHigh // configured to guarded
 	r.Lane = "fast"
-	err := assessment.Validate(r, frozen(t), policy())
+	err := assessment.Validate(r, frozen(t), releaseSettings())
 	assertRejection(t, err, "lane_does_not_match_risk")
 	assertRemedy(t, err, "configured lane")
 }
@@ -182,13 +196,13 @@ func TestAProceedingResultMustUseTheConfiguredLaneForItsRisk(t *testing.T) {
 func TestAProceedingResultMustNameALaneThatExists(t *testing.T) {
 	r := proceeding(t)
 	r.Lane = "instant"
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "undeclared_lane")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "undeclared_lane")
 }
 
 func TestAProceedingResultMustNameALane(t *testing.T) {
 	r := proceeding(t)
 	r.Lane = ""
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "incomplete_assessment")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "incomplete_assessment")
 }
 
 // A lane on a waiting recommendation would be a proposal wearing a refusal's
@@ -196,13 +210,13 @@ func TestAProceedingResultMustNameALane(t *testing.T) {
 func TestAWaitingResultCarriesNoLane(t *testing.T) {
 	r := waiting(t)
 	r.Lane = "guarded"
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "waiting_named_a_lane")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "waiting_named_a_lane")
 }
 
 func TestAWaitingResultMustSayWhatToDoNext(t *testing.T) {
 	r := waiting(t)
 	r.NextStep = ""
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "incomplete_assessment")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "incomplete_assessment")
 }
 
 // Two actions, and no third. An assessment cannot half-approve, defer, or
@@ -211,25 +225,25 @@ func TestOnlyProceedAndWaitAreActions(t *testing.T) {
 	for _, action := range []assessment.Action{"escalate", "approve", "defer", ""} {
 		r := proceeding(t)
 		r.Action = action
-		assertRejection(t, assessment.Validate(r, frozen(t), policy()), "invalid_action")
+		assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "invalid_action")
 	}
 }
 
 func TestUndeterminedCannotProceed(t *testing.T) {
 	r := proceeding(t)
 	r.Risk = assessment.RiskUndetermined
-	assertRejection(t, assessment.Validate(r, frozen(t), policy()), "undetermined_cannot_proceed")
+	assertRejection(t, assessment.Validate(r, frozen(t), releaseSettings()), "undetermined_cannot_proceed")
 }
 
 // Undetermined-and-waiting is an honest answer, not a failure to be corrected.
 func TestUndeterminedAndWaitingIsAccepted(t *testing.T) {
 	r := waiting(t)
 	r.Risk = assessment.RiskUndetermined
-	if err := assessment.Validate(r, frozen(t), policy()); err != nil {
+	if err := assessment.Validate(r, frozen(t), releaseSettings()); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	raw, _ := json.Marshal(r)
-	outcome := assessment.Resolve(raw, frozen(t), policy(), 1)
+	outcome := assessment.Resolve(raw, frozen(t), releaseSettings(), 1)
 	if !outcome.Accepted || outcome.Substituted {
 		t.Errorf("outcome = %+v", outcome)
 	}
@@ -248,7 +262,7 @@ func TestAnInvalidResultGetsOneCorrectionThenWaits(t *testing.T) {
 	f := frozen(t)
 	broken := []byte(`{"snapshot":"sha256:nope","observations":[],"risk":"low","action":"proceed","lane":"fast","rationale":"x"}`)
 
-	first := assessment.Resolve(broken, f, policy(), 1)
+	first := assessment.Resolve(broken, f, releaseSettings(), 1)
 	if first.Accepted || first.Substituted || first.Correction == nil {
 		t.Fatalf("first attempt = %+v", first)
 	}
@@ -256,7 +270,7 @@ func TestAnInvalidResultGetsOneCorrectionThenWaits(t *testing.T) {
 		t.Errorf("correction request = %q", assessment.CorrectionRequest(first.Correction))
 	}
 
-	second := assessment.Resolve(broken, f, policy(), assessment.MaxAttempts)
+	second := assessment.Resolve(broken, f, releaseSettings(), assessment.MaxAttempts)
 	if second.Accepted || !second.Substituted {
 		t.Fatalf("second attempt = %+v", second)
 	}
@@ -278,7 +292,7 @@ func TestEnvironmentImpactDoesNotChangeTheDecision(t *testing.T) {
 	base := frozen(t)
 	r := proceeding(t)
 
-	if err := assessment.Validate(r, base, policy()); err != nil {
+	if err := assessment.Validate(r, base, releaseSettings()); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
 	// The same assessment against a low-impact environment validates
@@ -290,7 +304,7 @@ func TestEnvironmentImpactDoesNotChangeTheDecision(t *testing.T) {
 		Health: base.Health(), CapturedAt: base.CapturedAt(),
 	})
 	r.SnapshotID = low.SnapshotID()
-	if err := assessment.Validate(r, low, policy()); err != nil {
+	if err := assessment.Validate(r, low, releaseSettings()); err != nil {
 		t.Fatalf("impact changed the outcome: %v", err)
 	}
 }

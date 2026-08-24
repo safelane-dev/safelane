@@ -59,6 +59,10 @@ type EligibilityInput struct {
 	// Comparison is deployed...candidate, for the ordering and relatedness
 	// rules.
 	Comparison Comparison
+	// ConfirmedWorkflowID is a release-scoped user confirmation made after
+	// SafeLane listed multiple successful exact-revision runs. Zero means no
+	// confirmation was supplied.
+	ConfirmedWorkflowID int64
 }
 
 // EvaluateEligibility applies every rule at once and reports all of them.
@@ -233,10 +237,15 @@ func (e *Eligibility) blockBuild(in EligibilityInput) {
 	if len(successful) == 1 {
 		return
 	}
+	for _, run := range successful {
+		if in.ConfirmedWorkflowID != 0 && run.ID == in.ConfirmedWorkflowID {
+			return
+		}
+	}
 	e.block("build_provenance_ambiguous",
 		fmt.Sprintf("%s has %s that could have produced this container, and SafeLane cannot prove which one did.",
 			short(in.Candidate.Revision.SHA), runCount(len(successful))),
-		"Publish provenance that identifies the producing workflow. Candidates: "+describeRuns(successful)+".")
+		"Confirm which workflow produced it for this release. Candidates: "+describeRuns(successful)+". Publishing provenance avoids this question next time.")
 }
 
 // Rejection turns an ineligible result into the typed error the rest of

@@ -15,6 +15,12 @@ func fixtureAPI(t *testing.T, routes map[string]string) *github.Client {
 	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		key := r.URL.Path
+		if r.Header.Get("Accept") == "application/vnd.github.diff" {
+			body := routes[key+"#diff"]
+			w.Header().Set("Content-Type", "text/plain")
+			_, _ = w.Write([]byte(body))
+			return
+		}
 		if r.URL.RawQuery != "" {
 			if body, ok := routes[key+"?"+r.URL.RawQuery]; ok {
 				w.Header().Set("Content-Type", "application/json")
@@ -116,6 +122,7 @@ func TestCompareCarriesEveryCommitInTheRange(t *testing.T) {
         ],
         "files":[{"filename":"internal/refunds.go","status":"added","additions":64,"deletions":12}]
     }`
+	routes["/repos/acme/payments-api/compare/"+deployedSHA+"..."+headSHA+"#diff"] = "diff --git a/internal/refunds.go b/internal/refunds.go\n"
 	client := fixtureAPI(t, routes)
 
 	comparison, err := client.Compare(context.Background(), "acme/payments-api", deployedSHA, headSHA)
@@ -130,6 +137,9 @@ func TestCompareCarriesEveryCommitInTheRange(t *testing.T) {
 	}
 	if len(comparison.Files) != 1 || comparison.Files[0].Additions != 64 {
 		t.Errorf("files = %+v", comparison.Files)
+	}
+	if len(comparison.Diff) == 0 {
+		t.Fatal("comparison did not carry the immutable raw diff")
 	}
 
 	// Pull requests appear only as provenance summaries: which pull requests
@@ -150,6 +160,22 @@ func TestCompareCarriesEveryCommitInTheRange(t *testing.T) {
 	// A squash merge puts the title in the subject.
 	if got := found[62]; got.Title != "feat: add refunds" {
 		t.Errorf("squash-merge PR = %+v", got)
+	}
+}
+
+func TestComparePaginatesUntilAheadByIsComplete(t *testing.T) {
+	path := "/repos/acme/payments-api/compare/" + deployedSHA + "..." + headSHA
+	routes := repoRoutes()
+	routes[path+"?per_page=100&page=1"] = `{"status":"ahead","ahead_by":2,"commits":[{"sha":"` + olderSHA + `"}]}`
+	routes[path+"?per_page=100&page=2"] = `{"status":"ahead","ahead_by":2,"commits":[{"sha":"` + headSHA + `"}]}`
+	routes[path+"#diff"] = "diff --git a/first.go b/first.go\ndiff --git a/second.go b/second.go\n"
+
+	comparison, err := fixtureAPI(t, routes).Compare(context.Background(), "acme/payments-api", deployedSHA, headSHA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comparison.Commits) != comparison.AheadBy || len(comparison.Files) != 2 {
+		t.Fatalf("comparison is incomplete: %+v", comparison)
 	}
 }
 
@@ -191,10 +217,10 @@ func TestRevisionReportsDefaultBranchMembership(t *testing.T) {
 	routes := repoRoutes()
 	routes["/repos/acme/payments-api/commits/"+forkSHA] = `{
         "sha":"` + forkSHA + `","commit":{"message":"wip","author":{"name":"A","date":"2026-08-20T09:00:00Z"}}}`
-	routes["/repos/acme/payments-api/compare/"+forkSHA+"...main"] = `{"status":"diverged","ahead_by":1,"behind_by":2}`
+	routes["/repos/acme/payments-api/compare/"+forkSHA+"...main"] = `{"status":"diverged","ahead_by":1,"behind_by":2,"commits":[{"sha":"` + headSHA + `"}]}`
 	routes["/repos/acme/payments-api/commits/"+olderSHA] = `{
         "sha":"` + olderSHA + `","commit":{"message":"chore: bump deps","author":{"name":"A","date":"2026-08-18T09:00:00Z"}}}`
-	routes["/repos/acme/payments-api/compare/"+olderSHA+"...main"] = `{"status":"ahead","ahead_by":2,"behind_by":0}`
+	routes["/repos/acme/payments-api/compare/"+olderSHA+"...main"] = `{"status":"ahead","ahead_by":2,"behind_by":0,"commits":[{"sha":"` + forkSHA + `"},{"sha":"` + headSHA + `"}]}`
 	client := fixtureAPI(t, routes)
 
 	fork, err := client.Revision(context.Background(), "acme/payments-api", forkSHA)

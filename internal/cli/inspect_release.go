@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -127,6 +128,13 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 	if err != nil {
 		return delta.ReleaseDelta{}, github.Eligibility{}, err
 	}
+	if baseline.revision == "" && !baseline.artifact.Zero() {
+		path := filepath.Join(config.ForApp(opts.Home, application).ForEnvironment(environment.Name).Dir, confirmedBaselineFile)
+		if confirmed, loadErr := loadConfirmedBaseline(path); loadErr == nil && confirmed.Artifact == baseline.artifact {
+			baseline.source = confirmed.Source
+			baseline.revision = confirmed.Source.Revision
+		}
+	}
 
 	candidate, err := github.SelectCandidate(ctx, opts.Source, cfg.Application.Repository, opts.Revision)
 	if err != nil {
@@ -138,16 +146,20 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 	protection, _ := opts.Source.Repository(ctx, ownerOf(cfg.Application.Repository), nameOf(cfg.Application.Repository))
 	checks, _ := opts.Source.Checks(ctx, cfg.Application.Repository, candidate.Revision.SHA)
 	comparison, _ := opts.Source.Compare(ctx, cfg.Application.Repository, baseline.revision, candidate.Revision.SHA)
+	environmentDir := config.ForApp(opts.Home, application).ForEnvironment(environment.Name).Dir
+	confirmedWorkflow := loadConfirmedBuild(filepath.Join(environmentDir, confirmedBuildFile),
+		candidate.Revision.SHA, candidateArtifact.Digest)
 
 	eligibility := github.EvaluateEligibility(github.EligibilityInput{
-		Repository:     cfg.Application.Repository,
-		Candidate:      candidate,
-		Deployed:       github.Revision{SHA: baseline.revision, OnDefaultBranch: true},
-		Artifact:       candidateArtifact,
-		ArtifactSource: candidateSource,
-		Protection:     protection,
-		Checks:         checks,
-		Comparison:     comparison,
+		Repository:          cfg.Application.Repository,
+		Candidate:           candidate,
+		Deployed:            github.Revision{SHA: baseline.revision, OnDefaultBranch: true},
+		Artifact:            candidateArtifact,
+		ArtifactSource:      candidateSource,
+		Protection:          protection,
+		Checks:              checks,
+		Comparison:          comparison,
+		ConfirmedWorkflowID: confirmedWorkflow,
 	})
 
 	history := []delta.HistoryCard(nil)
@@ -200,14 +212,7 @@ type runningBinding struct {
 // what is running" is one of the eligibility blockers, and it belongs there
 // with the others rather than as an error that hides the rest of the evidence.
 func bindRunning(ctx context.Context, resolver oci.Resolver, repository, live string) (runningBinding, error) {
-	reference := live
-	if index := strings.LastIndex(live, "@"); index >= 0 {
-		reference = live[index+1:]
-	} else if index := strings.LastIndex(live, ":"); index > strings.LastIndex(live, "/") {
-		reference = live[index+1:]
-	}
-
-	artifact, err := resolver.Resolve(ctx, repository, reference)
+	artifact, err := resolveRunningArtifact(ctx, resolver, repository, live)
 	if err != nil {
 		return runningBinding{}, nil
 	}
@@ -216,6 +221,17 @@ func bindRunning(ctx context.Context, resolver oci.Resolver, repository, live st
 		return runningBinding{artifact: artifact}, nil
 	}
 	return runningBinding{artifact: artifact, source: source, revision: source.Revision}, nil
+}
+
+func resolveRunningArtifact(ctx context.Context, resolver oci.Resolver, repository, live string) (oci.Artifact, error) {
+	reference := live
+	if index := strings.LastIndex(live, "@"); index >= 0 {
+		reference = live[index+1:]
+	} else if index := strings.LastIndex(live, ":"); index > strings.LastIndex(live, "/") {
+		reference = live[index+1:]
+	}
+
+	return resolver.Resolve(ctx, repository, reference)
 }
 
 // findCandidateArtifact looks for the container built from the candidate.
@@ -257,6 +273,10 @@ func changeSetFrom(comparison github.Comparison) delta.ChangeSet {
 			Number: pr.Number, Title: delta.Untrusted(pr.Title),
 			Branch: delta.Untrusted(pr.Summary), Merge: pr.Merge,
 		})
+	}
+	if len(comparison.Diff) > 0 {
+		set.Diffs = append(set.Diffs, delta.NewHandle("diff", comparison.Diff,
+			fmt.Sprintf("complete %s...%s source diff", comparison.Base, comparison.Head)))
 	}
 	return set
 }
@@ -330,7 +350,7 @@ func healthFrom(target discovery.Target) []delta.HealthObjective {
 // choose a different one; until it does, the cautious configured lane is what
 // SafeLane is proposing, and the deployment view says which.
 func defaultLane(cfg config.Config) (string, []int) {
-	name, lane, err := cfg.Policy.LaneFor("")
+	name, lane, err := cfg.ReleaseSettings.LaneFor("")
 	if err != nil {
 		return "", nil
 	}

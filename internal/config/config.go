@@ -9,7 +9,7 @@ import (
 )
 
 // Risk is an assessment outcome. It is not a number and it is not computed
-// here: an assessment reports one of these three, and [Policy.RiskMapping]
+// here: an assessment reports one of these three, and [ReleaseSettings.RiskMapping]
 // turns it into a lane already present in the saved settings.
 type Risk string
 
@@ -40,10 +40,10 @@ var Impacts = []Impact{ImpactLow, ImpactSignificant, ImpactCritical}
 
 // Config is the whole of `safelane.yml`.
 type Config struct {
-	Application  Application   `yaml:"application"`
-	Artifact     Artifact      `yaml:"artifact"`
-	Environments []Environment `yaml:"environments"`
-	Policy       Policy        `yaml:"policy"`
+	Application     Application     `yaml:"application"`
+	Artifact        Artifact        `yaml:"artifact"`
+	Environments    []Environment   `yaml:"environments"`
+	ReleaseSettings ReleaseSettings `yaml:"policy"`
 }
 
 // Application identifies what is being released and where its source lives.
@@ -87,10 +87,12 @@ type Kubernetes struct {
 	Rollout   string `yaml:"rollout"`
 }
 
-// Policy is the release-settings block. Registration writes it once, from the
+// ReleaseSettings is the release-settings block. Registration writes it once, from the
 // compiled defaults, and never touches it again: [Reconcile] carries whatever
 // is here across byte-for-byte.
-type Policy struct {
+// The serialized key remains `policy` because that is the locked file format;
+// it is not a policy engine or a separate governance object.
+type ReleaseSettings struct {
 	// DefaultLane is used when there is no risk at all - no assessment, or one
 	// that could not be validated. It is the cautious answer, never the widest
 	// lane, and "no assessment" is an expected case rather than a defect.
@@ -132,7 +134,7 @@ func (c Config) EnvironmentNames() []string {
 // or unrecognised risk resolves to DefaultLane, because "no assessment
 // available" is a legitimate case that must still pick a cautious lane rather
 // than fail or widen.
-func (p Policy) LaneFor(risk Risk) (name string, lane Lane, err error) {
+func (p ReleaseSettings) LaneFor(risk Risk) (name string, lane Lane, err error) {
 	name = p.RiskMapping[risk]
 	if name == "" {
 		name = p.DefaultLane
@@ -147,7 +149,7 @@ func (p Policy) LaneFor(risk Risk) (name string, lane Lane, err error) {
 }
 
 // LaneNames returns every declared lane name, sorted.
-func (p Policy) LaneNames() []string {
+func (p ReleaseSettings) LaneNames() []string {
 	names := make([]string, 0, len(p.Lanes))
 	for name := range p.Lanes {
 		names = append(names, name)
@@ -156,12 +158,12 @@ func (p Policy) LaneNames() []string {
 	return names
 }
 
-// DefaultPolicy is the policy block registration writes for a new Application:
+// DefaultReleaseSettings is the release-settings block registration writes for a new Application:
 // three lanes, and the obvious mapping onto them. Registration compiles these
 // once and then never revisits them, so a user who edits a weight keeps
 // that edit through every later registration.
-func DefaultPolicy() Policy {
-	return Policy{
+func DefaultReleaseSettings() ReleaseSettings {
+	return ReleaseSettings{
 		DefaultLane: "guarded",
 		RiskMapping: map[Risk]string{
 			RiskLow:    "fast",
@@ -185,7 +187,7 @@ func (c Config) Validate() error {
 	errs = append(errs, c.validateApplication()...)
 	errs = append(errs, c.validateArtifact()...)
 	errs = append(errs, c.validateEnvironments()...)
-	errs = append(errs, c.Policy.validate()...)
+	errs = append(errs, c.ReleaseSettings.validate()...)
 
 	return errs.OrNil()
 }
@@ -296,7 +298,7 @@ func (c Config) validateEnvironments() release.Errors {
 	return errs
 }
 
-func (p Policy) validate() release.Errors {
+func (p ReleaseSettings) validate() release.Errors {
 	var errs release.Errors
 
 	if len(p.Lanes) == 0 {

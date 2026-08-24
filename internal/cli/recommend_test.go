@@ -9,6 +9,7 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/releasepatch"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
 )
 
@@ -313,6 +314,42 @@ func TestRecommendIsJSONWhenPiped(t *testing.T) {
 	}
 }
 
+func TestRecommendFreezesUserProvidedEvidenceIntoTheFinalSnapshot(t *testing.T) {
+	opts := inspectOptions(t)
+	snapshot := snapshotFor(t, opts)
+	var recommendation assessment.Recommendation
+	if err := json.Unmarshal(a2Assessment(t, snapshot), &recommendation); err != nil {
+		t.Fatal(err)
+	}
+	recommendation.Provided = []assessment.ProvidedEvidence{{
+		Kind: "deployment fact", Value: "the migration already ran", Source: "user confirmation",
+		At: "2026-08-21T12:05:00Z", Candidate: candidateRevision, Environment: "production",
+	}}
+	raw, _ := json.Marshal(recommendation)
+	var stdout, stderr bytes.Buffer
+	if code := Recommend(context.Background(), RecommendOptions{
+		Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(raw),
+	}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("recommend: %s", stderr.String())
+	}
+	pending, found, err := releasepatch.LoadPending(config.ForApp(opts.Home, "payments-api").ForEnvironment("production").Dir)
+	if err != nil || !found {
+		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+	var stored struct {
+		Provided []struct {
+			Candidate   string `json:"candidate"`
+			Environment string `json:"environment"`
+		} `json:"provided"`
+	}
+	if err := json.Unmarshal(pending.Delta, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.Provided) != 1 || stored.Provided[0].Candidate != candidateRevision || stored.Provided[0].Environment != "production" {
+		t.Fatalf("provided evidence was not frozen: %+v", stored.Provided)
+	}
+}
+
 // Environment impact informs the explanation and never selects a lane. The
 // same assessment against a low-impact environment produces the same lane.
 func TestEnvironmentImpactDoesNotSelectTheLane(t *testing.T) {
@@ -344,7 +381,7 @@ func rewriteImpact(t *testing.T, home string, impact config.Impact) {
 				Context: "safelane-caller-payments-api", Namespace: "payments", Rollout: "payments-api",
 			},
 		},
-	}, config.DefaultPolicy())
+	}, config.DefaultReleaseSettings())
 	if _, err := config.Write(config.ForApp(home, "payments-api").File, file); err != nil {
 		t.Fatal(err)
 	}

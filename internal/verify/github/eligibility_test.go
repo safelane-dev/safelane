@@ -259,6 +259,19 @@ func TestWithoutProvenanceMultipleRunsRequireBetterProvenance(t *testing.T) {
 
 }
 
+func TestAListedWorkflowCanBeConfirmedForThisRelease(t *testing.T) {
+	in := eligible()
+	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
+	in.Checks.Workflows = []github.WorkflowRun{
+		{ID: 41, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+		{ID: 42, Name: "publish", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+	}
+	in.ConfirmedWorkflowID = 42
+	if result := github.EvaluateEligibility(in); !result.Eligible {
+		t.Fatalf("confirmed successful workflow remained ambiguous: %s", blockerCodes(result))
+	}
+}
+
 func TestNoSuccessfulBuildIsBlocked(t *testing.T) {
 	in := eligible()
 	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
