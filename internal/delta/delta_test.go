@@ -44,6 +44,11 @@ func input() delta.Input {
 			Rollout: "payments-api", Container: "payments-api",
 			Mechanism: "replica-approximate exposure; there is no traffic router",
 			Replicas:  4,
+			Lanes: []delta.LaneChoice{
+				{Risk: "low", Lane: "fast", Weights: []int{50, 100}},
+				{Risk: "medium", Lane: "standard", Weights: []int{25, 50, 100}},
+				{Risk: "high", Lane: "guarded", Weights: []int{25, 50, 75, 100}},
+			},
 			Patch: delta.Patch{
 				ContainerIndex: 0,
 				Image:          "ghcr.io/acme/payments-api@sha256:" + strings.Repeat("a", 64),
@@ -102,6 +107,7 @@ func TestTheBoundaryCannotBeMutatedThroughItsAccessors(t *testing.T) {
 
 	deployment := frozen.Deployment()
 	deployment.Patch.Weights[0] = 100
+	deployment.Lanes[0].Weights[0] = 100
 	deployment.Rollout = "another-rollout"
 
 	history := frozen.History()
@@ -114,6 +120,9 @@ func TestTheBoundaryCannotBeMutatedThroughItsAccessors(t *testing.T) {
 	}
 	if frozen.Deployment().Patch.Weights[0] != 25 {
 		t.Error("a patch weight was changed through an accessor")
+	}
+	if frozen.Deployment().Lanes[0].Weights[0] != 50 {
+		t.Error("a configured lane was changed through an accessor")
 	}
 	if frozen.History()[0].Outcome != "completed" {
 		t.Error("history was changed through an accessor")

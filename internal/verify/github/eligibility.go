@@ -212,20 +212,13 @@ func (e *Eligibility) blockChecks(in EligibilityInput) {
 // Three ways, in order of how little a person has to do:
 //
 //  1. The container's provenance names the run. Nothing to ask.
-//  2. Branch protection already required the checks, and they passed. The
-//     required checks are the answer.
-//  3. One successful run exists for the exact revision already bound by OCI
-//     metadata. In the POC's trusted-pipeline boundary, it is unambiguous.
-//  4. Multiple runs remain. SafeLane lists them and requires stronger
-//     provenance rather than inventing a producer.
+//  2. Without provenance, SafeLane lists every successful exact-revision run
+//     and requires a release-scoped confirmation. A required check proves
+//     that code passed CI; it does not prove which run built this container.
 func (e *Eligibility) blockBuild(in EligibilityInput) {
 	if in.ArtifactSource.Method == oci.BindingCIProvenance {
 		return
 	}
-	if in.Protection.Protected && len(in.Protection.RequiredChecks) > 0 {
-		return
-	}
-
 	successful := in.Checks.SuccessfulWorkflows()
 	if len(successful) == 0 {
 		e.block("no_successful_build",
@@ -234,18 +227,15 @@ func (e *Eligibility) blockBuild(in EligibilityInput) {
 			"Wait for the build to finish, or fix it.")
 		return
 	}
-	if len(successful) == 1 {
-		return
-	}
 	for _, run := range successful {
 		if in.ConfirmedWorkflowID != 0 && run.ID == in.ConfirmedWorkflowID {
 			return
 		}
 	}
 	e.block("build_provenance_ambiguous",
-		fmt.Sprintf("%s has %s that could have produced this container, and SafeLane cannot prove which one did.",
+		fmt.Sprintf("%s has %s that may have produced this container, but the container does not identify its build.",
 			short(in.Candidate.Revision.SHA), runCount(len(successful))),
-		"Confirm which workflow produced it for this release. Candidates: "+describeRuns(successful)+". Publishing provenance avoids this question next time.")
+		"Confirm the workflow that produced it for this release. Candidates: "+describeRuns(successful)+". Publishing provenance avoids this question next time.")
 }
 
 // Rejection turns an ineligible result into the typed error the rest of

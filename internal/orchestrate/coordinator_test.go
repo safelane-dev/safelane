@@ -133,7 +133,8 @@ func TestCoordinatorRecordsArgoAnalysisFailureWithoutIssuingAbort(t *testing.T) 
 		observed: []journal.Observed{
 			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
 			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
-			{State: journal.StateFailed, Weight: 0},
+			{State: journal.StateFailed, Weight: 25, Restored: false},
+			{State: journal.StateFailed, Weight: 0, Restored: true},
 		},
 		measurements: []journal.Measurement{{Phase: "Failed", Successful: 0, Count: 1}},
 	}

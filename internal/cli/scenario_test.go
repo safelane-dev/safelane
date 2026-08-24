@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -121,7 +123,7 @@ func world(t *testing.T, name string) InspectOptions {
 
 	case "large-diff":
 		source := defaultInspectSource()
-		source.comparison.Files = []github.FileChange{{Path: "internal/generated/routes.go", Status: "modified", Additions: 4200, Deletions: 4100}}
+		source.comparison.Files = []github.FileChange{{Path: "docs/generated/routes-reference.md", Status: "modified", Additions: 4200, Deletions: 4100}}
 		opts.Source = source
 		return opts
 
@@ -164,6 +166,177 @@ func TestFixedAssessmentScenarios(t *testing.T) {
 			t.Fatalf("%s: %v", entry.Name(), err)
 		}
 		t.Run(s.Name, func(t *testing.T) { runScenario(t, s) })
+	}
+}
+
+// TestActiveAgentAssessmentScenarios evaluates the actual skill's judgement,
+// not the prewritten submissions used by the fast structural suite. It is
+// opt-in because it calls a model and is therefore slower, costs money, and is
+// not deterministic enough to gate every commit. Before a release, run it with
+// SAFELANE_AGENT_EVAL=claude (the product experience) or =codex (a compatible
+// independent evaluator).
+func TestActiveAgentAssessmentScenarios(t *testing.T) {
+	provider := strings.TrimSpace(os.Getenv("SAFELANE_AGENT_EVAL"))
+	if provider == "" {
+		t.Skip("set SAFELANE_AGENT_EVAL=claude or codex to run the active-agent evaluation")
+	}
+	if provider != "claude" && provider != "codex" {
+		t.Fatalf("unsupported SAFELANE_AGENT_EVAL %q", provider)
+	}
+
+	skill, err := os.ReadFile(filepath.Join("..", "skill", "SKILL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(filepath.Join("..", "..", "testdata", "assessment"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".json") {
+			continue
+		}
+		raw, err := os.ReadFile(filepath.Join("..", "..", "testdata", "assessment", entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var scenario scenario
+		if err := json.Unmarshal(raw, &scenario); err != nil {
+			t.Fatal(err)
+		}
+		if !scenario.Expect.Eligible || scenario.Expect.AssessmentRejected || scenario.World == "deployment-shapes" {
+			continue
+		}
+		t.Run(scenario.Name, func(t *testing.T) {
+			opts := world(t, scenario.World)
+			frozen, eligibility, err := FreezeDelta(context.Background(), opts)
+			if err != nil || !eligibility.Eligible {
+				t.Fatalf("freeze: eligible=%t, err=%v", eligibility.Eligible, err)
+			}
+			turn := runAssessmentAgent(t, provider, string(skill), frozen)
+			t.Logf("questions: %+v\nassessment: %s", turn.Questions, turn.Assessment)
+			checkAgentQuestions(t, scenario, turn.Questions)
+
+			var stdout, stderr bytes.Buffer
+			code := Recommend(context.Background(), RecommendOptions{
+				Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(turn.Assessment),
+			}, &stdout, &stderr)
+			if code != ExitOK {
+				t.Fatalf("agent assessment was rejected: %s\n%s", stderr.String(), turn.Assessment)
+			}
+			var result struct {
+				Recommendation assessment.Recommendation `json:"recommendation"`
+				Text           string                    `json:"text"`
+			}
+			if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
+				t.Fatal(err)
+			}
+			checkDirection(t, scenario, result.Recommendation, result.Text)
+		})
+	}
+}
+
+type agentQuestion struct {
+	Question string `json:"question"`
+	Why      string `json:"why"`
+}
+
+type agentAssessmentTurn struct {
+	Questions  []agentQuestion `json:"questions"`
+	Assessment json.RawMessage `json:"assessment"`
+}
+
+func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.ReleaseDelta) agentAssessmentTurn {
+	t.Helper()
+	views, err := json.MarshalIndent(frozen.Views(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	handles, err := json.MarshalIndent(frozen.Handles(), "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	prompt := fmt.Sprintf(`You are evaluating SafeLane's active assessment skill. Follow the Assess section below exactly.
+
+For this offline evaluation, do not inspect the repository or use tools. Read all four supplied frozen views. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
+
+Return JSON only with this outer shape:
+{"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
+
+Inside assessment, copy the skill's exact field names and nesting. In particular, observations use statement; hazards use name, evidence, preconditions, consequence, and a nested coverage object. Do not use observation, hazard, recommendation, decision, user_facts, or other synonyms.
+
+The assessment snapshot must be %q. Evidence citations must be a view name or listed handle. Do not use facts from this evaluation instruction as release evidence.
+
+SKILL:
+%s
+
+FROZEN VIEWS:
+%s
+
+AVAILABLE HANDLES:
+%s
+`, frozen.SnapshotID(), skill, views, handles)
+
+	output := filepath.Join(t.TempDir(), "assessment.json")
+	var command *exec.Cmd
+	if provider == "claude" {
+		command = exec.Command("claude", "-p", "--bare", "--tools", "", "--no-session-persistence")
+		command.Stdin = strings.NewReader(prompt)
+	} else {
+		root, err := filepath.Abs(filepath.Join("..", ".."))
+		if err != nil {
+			t.Fatal(err)
+		}
+		command = exec.Command("codex", "exec", "-C", root, "-s", "read-only", "--ephemeral",
+			"--ignore-user-config", "--ignore-rules", "-o", output, "-")
+		command.Stdin = strings.NewReader(prompt)
+	}
+	transcript, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s assessment failed: %v\n%s", provider, err, transcript)
+	}
+	raw := transcript
+	if provider == "codex" {
+		raw, err = os.ReadFile(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw = bytes.TrimSpace(raw)
+	raw = bytes.TrimPrefix(raw, []byte("```json"))
+	raw = bytes.TrimPrefix(raw, []byte("```"))
+	raw = bytes.TrimSuffix(raw, []byte("```"))
+	var turn agentAssessmentTurn
+	if err := json.Unmarshal(bytes.TrimSpace(raw), &turn); err != nil {
+		t.Fatalf("agent did not return the evaluation contract: %v\n%s", err, raw)
+	}
+	if len(turn.Assessment) == 0 || string(turn.Assessment) == "null" {
+		t.Fatalf("agent returned no final assessment: %s", raw)
+	}
+	return turn
+}
+
+func checkAgentQuestions(t *testing.T, scenario scenario, questions []agentQuestion) {
+	t.Helper()
+	if scenario.Expect.AskedForNothing && len(questions) != 0 {
+		t.Errorf("complete evidence prompted %d question(s): %+v", len(questions), questions)
+	}
+	seen := make(map[string]bool)
+	for _, question := range questions {
+		plain := strings.TrimSpace(question.Question)
+		if plain == "" || strings.Count(plain, "?") != 1 || strings.TrimSpace(question.Why) == "" {
+			t.Errorf("question is not singular or does not explain why it matters: %+v", question)
+		}
+		key := strings.ToLower(plain)
+		if seen[key] {
+			t.Errorf("question repeated after the assumed 'I don't know': %q", plain)
+		}
+		seen[key] = true
+		for _, term := range []string{"guarded lane", "risk score", "evidence handle", "assessment session"} {
+			if strings.Contains(strings.ToLower(plain+" "+question.Why), term) {
+				t.Errorf("question exposed internal terminology %q: %+v", term, question)
+			}
+		}
 	}
 }
 

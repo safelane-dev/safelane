@@ -1,8 +1,8 @@
 {
   "name": "a retry change accounts for the relevant prior latency failure",
-  "why": "History matters only when it is relevant to this deployment. A previous retry-related latency failure justifies a slower configured lane without turning history into an automatic veto.",
+  "why": "History matters only when it is relevant to this deployment. Here the same retry behavior previously raised latency, idempotency and backoff are unknown, and the configured analysis cannot see either duplicate ledger effects or latency, so waiting is supportable rather than blindly vetoing from history.",
   "world": "dependency-history",
-  "expect": {"eligible": true, "action": "proceed", "lane": "standard", "approvable": true},
+  "expect": {"eligible": true, "action": "wait", "no_lane": true, "names_a_next_step": true, "approvable": false},
   "assessment": {
     "snapshot": "",
     "observations": [{"statement": "This release changes ledger retries, and a previous related release raised latency.", "evidence": ["changes", "history"]}],
@@ -12,9 +12,13 @@
       "evidence": ["changes", "history"],
       "preconditions": ["the ledger is slow", "the new retries overlap"],
       "consequence": "Request latency and load can rise together.",
-      "coverage": {"status": "partially_covered", "evidence": ["health"], "explanation": "Request failures are measured, but latency is not."}
+      "coverage": {"status": "partially_covered", "evidence": ["health"], "explanation": "Request failures are measured, but latency and retry amplification are not."}
     }],
-    "risk": "medium", "action": "proceed", "lane": "standard",
-    "rationale": "The related failure supports a slower rollout while the configured health check watches request success."
+    "risk": "high", "action": "wait",
+    "rationale": "The same retry behavior previously raised latency, while the controls that would prevent recurrence are unknown.",
+    "concern": "Ledger retries could amplify latency or repeat a financial side effect.",
+    "unconfirmed": "Whether ledger operations are idempotent and retries have effective limits and backoff.",
+    "analysis_blindspot": "The configured analysis measures success rate, not duplicate ledger effects, latency, or retry amplification.",
+    "next_step": "Confirm retry idempotency, limits, and backoff before this release."
   }
 }

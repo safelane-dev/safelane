@@ -119,26 +119,26 @@ func TestTheControlsSayWhenThereIsNoActiveRelease(t *testing.T) {
 func TestWhenTheRecordAndTheClusterDisagreeTheRolloutWins(t *testing.T) {
 	opts, store := controlOptions(t)
 	opts.Observe = func(context.Context, config.Environment) (journal.Observed, error) {
-		return journal.Observed{State: journal.StateFailed, Weight: 50, Aborted: true}, nil
+		return journal.Observed{State: journal.StateFailed, Weight: 0, Aborted: true, Restored: true}, nil
 	}
 
 	var stdout, stderr bytes.Buffer
 	if code := Status(context.Background(), opts, &terminal{&stdout}, &stderr); code != ExitOK {
 		t.Fatalf("status: %s", stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "the cluster says") {
+	if !strings.Contains(stdout.String(), "finalized the release") {
 		t.Errorf("the correction was not reported:\n%s", stdout.String())
 	}
-	if !strings.Contains(stdout.String(), "Argo stopped the rollout at 50%") {
+	if !strings.Contains(stdout.String(), "Argo stopped the rollout at 0%") {
 		t.Errorf("stdout = %q", stdout.String())
 	}
 
-	record, _, err := store.Active()
-	if err != nil {
-		t.Fatal(err)
+	if _, found, err := store.Active(); err != nil || found {
+		t.Errorf("terminal record remained active: found=%v err=%v", found, err)
 	}
-	if record.State != journal.StateFailed || record.Weight != 50 {
-		t.Errorf("the record was not reconciled: %+v", record)
+	latest, found, err := store.Latest()
+	if err != nil || !found || latest.State != journal.StateFailed || latest.Weight != 0 {
+		t.Errorf("terminal record was not finalized: %+v found=%v err=%v", latest, found, err)
 	}
 }
 
@@ -224,7 +224,7 @@ func TestStopAbortsAndRecordsTheReason(t *testing.T) {
 		t.Errorf("Active = %+v %v %v after a stop request", active, found, err)
 	}
 	opts.Observe = func(context.Context, config.Environment) (journal.Observed, error) {
-		return journal.Observed{State: journal.StateFailed, Weight: 0}, nil
+		return journal.Observed{State: journal.StateFailed, Weight: 0, Restored: true}, nil
 	}
 	stdout.Reset()
 	if code := Status(context.Background(), opts, &terminal{&stdout}, &stderr); code != ExitOK {

@@ -143,9 +143,18 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 	candidateArtifact, candidateSource := findCandidateArtifact(ctx, opts.Registry,
 		cfg.Artifact.Image, cfg.Application.Repository, candidate.Revision.SHA)
 
-	protection, _ := opts.Source.Repository(ctx, ownerOf(cfg.Application.Repository), nameOf(cfg.Application.Repository))
-	checks, _ := opts.Source.Checks(ctx, cfg.Application.Repository, candidate.Revision.SHA)
-	comparison, _ := opts.Source.Compare(ctx, cfg.Application.Repository, baseline.revision, candidate.Revision.SHA)
+	protection, err := opts.Source.Repository(ctx, ownerOf(cfg.Application.Repository), nameOf(cfg.Application.Repository))
+	if err != nil {
+		return delta.ReleaseDelta{}, github.Eligibility{}, sourceEvidenceUnavailable("repository settings", err)
+	}
+	checks, err := opts.Source.Checks(ctx, cfg.Application.Repository, candidate.Revision.SHA)
+	if err != nil {
+		return delta.ReleaseDelta{}, github.Eligibility{}, sourceEvidenceUnavailable("CI checks", err)
+	}
+	comparison, err := opts.Source.Compare(ctx, cfg.Application.Repository, baseline.revision, candidate.Revision.SHA)
+	if err != nil {
+		return delta.ReleaseDelta{}, github.Eligibility{}, sourceEvidenceUnavailable("source comparison", err)
+	}
 	environmentDir := config.ForApp(opts.Home, application).ForEnvironment(environment.Name).Dir
 	confirmedWorkflow := loadConfirmedBuild(filepath.Join(environmentDir, confirmedBuildFile),
 		candidate.Revision.SHA, candidateArtifact.Digest)
@@ -167,6 +176,17 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 		history, _ = opts.History(application, environment.Name)
 	}
 
+	changes := changeSetFrom(comparison)
+	if len(changes.Diffs) > 0 {
+		if err := saveDiffLocator(environmentDir, diffLocator{
+			Handle: changes.Diffs[0], Repository: cfg.Application.Repository,
+			Base: comparison.Base, Head: comparison.Head,
+		}); err != nil {
+			return delta.ReleaseDelta{}, github.Eligibility{}, release.Internal("save_diff_locator",
+				fmt.Sprintf("could not save the source diff locator: %v", err))
+		}
+	}
+
 	lane, weights := defaultLane(cfg)
 	frozen := delta.Freeze(delta.Input{
 		Application: application,
@@ -182,13 +202,19 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 			Method:  string(candidateSource.Method),
 			Subject: delta.Untrusted(candidate.Revision.Subject),
 		},
-		Changes:    changeSetFrom(comparison),
+		Changes:    changes,
 		Deployment: deploymentFrom(cfg, environment, target, container, candidateArtifact, lane, weights),
 		Health:     healthFrom(target),
 		History:    history,
 		CapturedAt: opts.now(),
 	})
 	return frozen, eligibility, nil
+}
+
+func sourceEvidenceUnavailable(kind string, err error) error {
+	return release.UnknownEvidenceError("source_evidence_unavailable", "source",
+		fmt.Sprintf("SafeLane could not read %s: %v", kind, err),
+		"Check GitHub access and try the inspection again.")
 }
 
 func (o InspectOptions) now() time.Time {
@@ -297,6 +323,7 @@ func deploymentFrom(cfg config.Config, environment config.Environment, target di
 		Container:   container.Name,
 		Mechanism:   exposureMechanism(target),
 		Replicas:    delta.ReplicasIn(target.RolloutJSON),
+		Lanes:       laneChoices(cfg.ReleaseSettings),
 		// Names only. The live Rollout carries values; this reads references
 		// out of it and the object itself never crosses the boundary.
 		SecretReferences: delta.SecretReferencesIn(target.RolloutJSON),
@@ -307,6 +334,18 @@ func deploymentFrom(cfg config.Config, environment config.Environment, target di
 			Weights:        weights,
 		},
 	}
+}
+
+func laneChoices(settings config.ReleaseSettings) []delta.LaneChoice {
+	choices := make([]delta.LaneChoice, 0, len(config.Risks))
+	for _, risk := range config.Risks {
+		name := settings.RiskMapping[risk]
+		lane := settings.Lanes[name]
+		choices = append(choices, delta.LaneChoice{
+			Risk: string(risk), Lane: name, Weights: append([]int(nil), lane.Weights...),
+		})
+	}
+	return choices
 }
 
 // exposureMechanism describes how honestly the weights map to traffic. A

@@ -112,7 +112,7 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "safelane",
 		Short:         "Release coordination for coding agents",
-		Long:          "SafeLane reads what changed, recommends how far to release it, and coordinates Argo Rollouts through promotion or rollback.",
+		Long:          "SafeLane reads what changed, recommends how far to release it, and stays attached to an existing Argo Rollout through a terminal outcome.",
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		Args:          cobra.NoArgs,
@@ -123,10 +123,32 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "name the application when this repository is registered as more than one")
 
 	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectCommand(rt),
-		recommendCommand(rt), approveCommand(rt), confirmBaselineCommand(rt), confirmBuildCommand(rt), registerApplyCommand(rt), runCommand(rt))
+		recommendCommand(rt), approveCommand(rt), confirmBaselineCommand(rt), confirmBuildCommand(rt), evidenceCommand(rt), registerApplyCommand(rt), runCommand(rt))
 	root.AddCommand(naturalControls(rt)...)
 	root.AddCommand(completionCommand(root), versionCommand())
 	return root
+}
+
+// evidenceCommand is an agent adapter for loading a content-addressed source
+// diff only when the assessment needs more detail than the four compact views.
+func evidenceCommand(rt commandRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:    "evidence <env> <handle>",
+		Short:  "Load evidence named by a frozen Release Delta",
+		Hidden: true,
+		Args:   cobra.ExactArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			return exit(cli.Evidence(cmd.Context(), cli.EvidenceOptions{
+				Root: rt.root, Home: home, Application: rt.app, Environment: args[0], HandleID: args[1],
+				Origin: discovery.GitHubOrigin, Source: &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
+			}, rt.stdout, rt.stderr))
+		},
+	}
+	return cmd
 }
 
 // confirmBuildCommand is the agent adapter used after the user selects one of

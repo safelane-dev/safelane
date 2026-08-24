@@ -76,10 +76,11 @@ func (c Cluster) ObserveRelease(ctx context.Context) (journal.Observed, error) {
 		return journal.Observed{}, err
 	}
 	return journal.Observed{
-		State:   observedState(status),
-		Weight:  status.CurrentWeight,
-		AtGate:  status.State == execute.StateAtGate,
-		Aborted: status.State == execute.StateAborted,
+		State:    observedState(status),
+		Weight:   status.CurrentWeight,
+		AtGate:   status.State == execute.StateAtGate,
+		Aborted:  status.State == execute.StateAborted,
+		Restored: status.Restored,
 	}, nil
 }
 

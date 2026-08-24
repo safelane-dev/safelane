@@ -357,6 +357,17 @@ func (c *Client) Compare(ctx context.Context, repository, base, head string) (Co
 	return comparison, nil
 }
 
+// RawDiff retrieves the exact source range behind a frozen diff handle. The
+// caller verifies the returned bytes against that handle before exposing them.
+func (c *Client) RawDiff(ctx context.Context, repository, base, head string) ([]byte, error) {
+	owner, name, err := splitRepository(repository)
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, name, url.PathEscape(base), url.PathEscape(head))
+	return c.read(ctx, path, "application/vnd.github.diff")
+}
+
 func hasFile(files []FileChange, path string) bool {
 	for _, file := range files {
 		if file.Path == path {

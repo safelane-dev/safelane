@@ -5,7 +5,7 @@
   "expect": {"eligible": true, "action": "proceed", "lane": "fast", "approvable": true},
   "assessment": {
     "snapshot": "",
-    "observations": [{"statement": "The large change is confined to a generated route table and the required build passed.", "evidence": ["changes"]}],
+    "observations": [{"statement": "The large change is confined to generated route-reference documentation and the required build passed.", "evidence": ["changes"]}],
     "risk": "low", "action": "proceed", "lane": "fast",
     "rationale": "Diff size alone does not establish a deployment hazard."
   }

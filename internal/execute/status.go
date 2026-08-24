@@ -75,6 +75,10 @@ type Status struct {
 	// field is already gone can still reconstruct the name deterministically.
 	CurrentPodHash string
 	Revision       string
+	// Restored is true only after an aborted/degraded Rollout has no updated
+	// canary replicas, stable capacity is ready, and routed canary traffic (if
+	// reported) is zero.
+	Restored bool
 }
 
 // rolloutStatusDoc is the subset of `kubectl get rollout -o json` this
@@ -95,6 +99,9 @@ type rolloutStatusDoc struct {
 		StableRS           string        `json:"stableRS"`
 		CurrentPodHash     string        `json:"currentPodHash"`
 		CurrentStepIndex   *int          `json:"currentStepIndex"`
+		Replicas           *int          `json:"replicas"`
+		ReadyReplicas      *int          `json:"readyReplicas"`
+		UpdatedReplicas    *int          `json:"updatedReplicas"`
 		PauseConditions    []any         `json:"pauseConditions"`
 		Canary             struct {
 			CurrentStepAnalysisRunStatus struct {
@@ -180,7 +187,25 @@ func parseStatus(raw []byte) (Status, error) {
 		AnalysisRunPhase:   doc.Status.Canary.CurrentBackgroundAnalysisRunStatus.Status,
 		CurrentPodHash:     doc.Status.CurrentPodHash,
 		Revision:           doc.Metadata.Annotations.Revision,
+		Restored:           restorationComplete(doc),
 	}, nil
+}
+
+func restorationComplete(doc rolloutStatusDoc) bool {
+	if !doc.Status.Abort && doc.Status.Phase != "Degraded" {
+		return false
+	}
+	if doc.Status.StableRS == "" || doc.Status.Replicas == nil ||
+		doc.Status.ReadyReplicas == nil || doc.Status.UpdatedReplicas == nil {
+		return false
+	}
+	if *doc.Status.UpdatedReplicas != 0 || *doc.Status.ReadyReplicas < *doc.Status.Replicas {
+		return false
+	}
+	if weight := doc.Status.Canary.Weights.Canary.Weight; weight != nil && *weight != 0 {
+		return false
+	}
+	return true
 }
 
 func rolloutImageDigest(doc rolloutStatusDoc) string {

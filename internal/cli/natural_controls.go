@@ -118,7 +118,7 @@ func Status(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) 
 		if observeErr != nil {
 			return writeResultError(stderr, "status", observeErr)
 		}
-		if record.Status().Restoring && observed.State == journal.StateFailed {
+		if record.Status().Restoring && observed.State == journal.StateFailed && observed.Restored {
 			now := opts.now()
 			record, err = store.Append(record, journal.Event{
 				At: now, Kind: "restored", By: journal.ActorArgo,
@@ -134,6 +134,33 @@ func Status(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) 
 				return writeResultError(stderr, "status", err)
 			}
 			correction = "Argo finished restoring the stable version."
+		} else if record.Status().Restoring && observed.State == journal.StateFailed {
+			record.Weight = observed.Weight
+			if err := store.Save(record); err != nil {
+				return writeResultError(stderr, "status", err)
+			}
+		} else if observed.State.Terminal() {
+			now := opts.now()
+			if observed.State == journal.StateFailed && !observed.Restored {
+				record.State = journal.StateMonitoring
+				record.Weight = observed.Weight
+				if err := store.Save(record); err != nil {
+					return writeResultError(stderr, "status", err)
+				}
+			} else {
+				outcome := "released"
+				reason := ""
+				if observed.State == journal.StateFailed {
+					outcome = "Argo restored the stable version"
+					reason = record.Reason
+				}
+				record.Weight = observed.Weight
+				record, err = store.Finish(record, observed.State, outcome, reason, now)
+				if err != nil {
+					return writeResultError(stderr, "status", err)
+				}
+				correction = "SafeLane finalized the release from the terminal Rollout state."
+			}
 		} else {
 			var changed bool
 			record, correction, changed = journal.Reconcile(record, observed, opts.now())

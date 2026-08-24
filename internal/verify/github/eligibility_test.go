@@ -35,8 +35,12 @@ func eligible() github.EligibilityInput {
 			Runs: []github.CheckRun{
 				{Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 			},
+			Workflows: []github.WorkflowRun{
+				{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+			},
 		},
-		Comparison: github.Comparison{Base: deployedSHA, Head: headSHA, Status: "ahead", AheadBy: 3},
+		Comparison:          github.Comparison{Base: deployedSHA, Head: headSHA, Status: "ahead", AheadBy: 3},
+		ConfirmedWorkflowID: 42,
 	}
 }
 
@@ -98,6 +102,7 @@ func TestARequiredCheckThatNeverReportedIsBlocked(t *testing.T) {
 // A check run reported against some other commit is somebody else's evidence.
 func TestChecksAreScopedToTheExactRevision(t *testing.T) {
 	in := eligible()
+	in.ArtifactSource.Method = oci.BindingCIProvenance
 	in.Checks = github.Checks{Revision: headSHA, Runs: []github.CheckRun{
 		{Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: olderSHA},
 	}}
@@ -185,6 +190,7 @@ func TestMissingBranchProtectionIsReportedNotBlocked(t *testing.T) {
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 	}
+	in.ConfirmedWorkflowID = 42
 
 	result := github.EvaluateEligibility(in)
 	if !result.Eligible {
@@ -203,6 +209,7 @@ func TestAProtectedBranchWithNoRequiredChecksIsReported(t *testing.T) {
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 	}
+	in.ConfirmedWorkflowID = 42
 
 	result := github.EvaluateEligibility(in)
 	if !result.Eligible {
@@ -226,16 +233,18 @@ func TestProvenanceIdentifiesTheProducingRunWithoutAsking(t *testing.T) {
 	}
 }
 
-func TestOneSuccessfulRunForTheBoundRevisionNeedsNoUserConfirmation(t *testing.T) {
+func TestOneSuccessfulRunStillNeedsReleaseScopedConfirmation(t *testing.T) {
 	in := eligible()
 	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 	}
 
-	result := github.EvaluateEligibility(in)
-	if !result.Eligible {
-		t.Fatalf("the only successful exact-revision run was treated as ambiguous: %s", blockerCodes(result))
+	in.ConfirmedWorkflowID = 0
+	assertBlocker(t, github.EvaluateEligibility(in), "build_provenance_ambiguous")
+	in.ConfirmedWorkflowID = 42
+	if result := github.EvaluateEligibility(in); !result.Eligible {
+		t.Fatalf("the confirmed exact-revision run remained blocked: %s", blockerCodes(result))
 	}
 }
 
@@ -248,6 +257,7 @@ func TestWithoutProvenanceMultipleRunsRequireBetterProvenance(t *testing.T) {
 		{ID: 42, Name: "publish", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 		{ID: 43, Name: "lint", Status: "completed", Conclusion: "failure", HeadSHA: headSHA},
 	}
+	in.ConfirmedWorkflowID = 0
 
 	blocker := assertBlocker(t, github.EvaluateEligibility(in), "build_provenance_ambiguous")
 	if !strings.Contains(blocker.Remedy, "run 41") || !strings.Contains(blocker.Remedy, "run 42") {
@@ -278,6 +288,7 @@ func TestNoSuccessfulBuildIsBlocked(t *testing.T) {
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 41, Name: "build-and-push", Status: "completed", Conclusion: "failure", HeadSHA: headSHA},
 	}
+	in.ConfirmedWorkflowID = 0
 
 	assertBlocker(t, github.EvaluateEligibility(in), "no_successful_build")
 }

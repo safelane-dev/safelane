@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -12,6 +14,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/delta"
 	"github.com/AndrewMaged814/safelane/internal/discovery"
+	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
 	"github.com/AndrewMaged814/safelane/internal/verify/oci"
 )
@@ -103,15 +106,19 @@ type inspectSource struct {
 	protection github.Repository
 	checks     github.Checks
 	comparison github.Comparison
+	err        error
 }
 
 func (s inspectSource) Repository(context.Context, string, string) (github.Repository, error) {
+	if s.err != nil {
+		return github.Repository{}, s.err
+	}
 	return s.protection, nil
 }
 
 func (s inspectSource) DefaultHead(context.Context, string) (github.Revision, error) {
 	return github.Revision{
-		SHA: candidateRevision, Subject: "feat: add refunds",
+		SHA: candidateRevision, Subject: "docs: correct a typo in the refund guide",
 		OnDefaultBranch: true, CommittedAt: time.Date(2026, 8, 20, 9, 0, 0, 0, time.UTC),
 	}, nil
 }
@@ -136,15 +143,17 @@ func defaultInspectSource() inspectSource {
 		},
 		checks: github.Checks{Revision: candidateRevision, Runs: []github.CheckRun{
 			{Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: candidateRevision},
+		}, Workflows: []github.WorkflowRun{
+			{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: candidateRevision},
 		}},
 		comparison: github.Comparison{
 			Base: runningRevision, Head: candidateRevision, Status: "ahead", AheadBy: 2,
 			Commits: []github.Revision{
-				{SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Subject: "chore: bump deps"},
-				{SHA: candidateRevision, Subject: "feat: add refunds"},
+				{SHA: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", Subject: "docs: clarify the refund example"},
+				{SHA: candidateRevision, Subject: "docs: correct a typo in the refund guide"},
 			},
 			Files: []github.FileChange{
-				{Path: "internal/refunds.go", Status: "added", Additions: 64, Deletions: 12},
+				{Path: "docs/refunds.md", Status: "modified", Additions: 1, Deletions: 1},
 			},
 		},
 	}
@@ -172,9 +181,16 @@ func registeredHome(t *testing.T) string {
 func inspectOptions(t *testing.T) InspectOptions {
 	t.Helper()
 	cluster := inspectCluster()
+	home := registeredHome(t)
+	confirmationPath := filepath.Join(config.ForApp(home, "payments-api").ForEnvironment("production").Dir, confirmedBuildFile)
+	if err := saveConfirmedBuild(confirmationPath, confirmedBuild{
+		Candidate: candidateRevision, Digest: candidateDigest, RunID: 42, RunName: "build-and-push",
+	}); err != nil {
+		t.Fatal(err)
+	}
 	return InspectOptions{
 		Root:        ".",
-		Home:        registeredHome(t),
+		Home:        home,
 		Environment: "production",
 		Cluster: discovery.Service{
 			Run:    cluster.run,
@@ -203,7 +219,7 @@ func TestInspectFreezesADeltaAndReportsFourViews(t *testing.T) {
 		}
 	}
 	for _, want := range []string{
-		"2 commits", "internal/refunds.go",
+		"2 commits", "docs/refunds.md",
 		"production (critical impact)", `Rollout "payments-api"`,
 		"success-rate", "Prometheus", "result[0] >= 0.99",
 		"no previous SafeLane release",
@@ -225,6 +241,70 @@ func TestInspectionContentAddressesTheCompleteRawDiff(t *testing.T) {
 	}
 	if len(frozen.Changes().Diffs) != 1 || frozen.Changes().Diffs[0].Kind != "diff" {
 		t.Fatalf("raw diff handle = %+v", frozen.Changes().Diffs)
+	}
+}
+
+type diffFixture struct {
+	content []byte
+	err     error
+}
+
+func (f diffFixture) RawDiff(context.Context, string, string, string) ([]byte, error) {
+	return f.content, f.err
+}
+
+func TestEvidenceResolvesAndVerifiesTheFrozenRawDiff(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	diff := []byte("diff --git a/internal/refunds.go b/internal/refunds.go\n+func Refund() {}\n")
+	source.comparison.Diff = diff
+	opts.Source = source
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	handle := frozen.Changes().Diffs[0]
+
+	var stdout, stderr bytes.Buffer
+	code := Evidence(context.Background(), EvidenceOptions{
+		Root: ".", Home: opts.Home, Environment: "production", HandleID: handle.ID,
+		Origin: func(string) (string, error) { return "acme/payments-api", nil },
+		Source: diffFixture{content: diff},
+	}, &stdout, &stderr)
+	if code != ExitOK || !bytes.Equal(stdout.Bytes(), diff) {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.Bytes(), stderr.String())
+	}
+}
+
+func TestEvidenceRefusesBytesThatDoNotMatchTheFrozenHandle(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	source.comparison.Diff = []byte("original diff")
+	opts.Source = source
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := Evidence(context.Background(), EvidenceOptions{
+		Root: ".", Home: opts.Home, Environment: "production", HandleID: frozen.Changes().Diffs[0].ID,
+		Origin: func(string) (string, error) { return "acme/payments-api", nil },
+		Source: diffFixture{content: []byte("changed diff")},
+	}, &stdout, &stderr)
+	if code == ExitOK || stdout.Len() != 0 || !strings.Contains(stderr.String(), "does not match what was frozen") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestFreezeDeltaDoesNotHideSourceEvidenceFailures(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	source.err = errors.New("GitHub unavailable")
+	opts.Source = source
+	_, _, err := FreezeDelta(context.Background(), opts)
+	if err == nil || !errors.Is(err, release.ErrEvidenceUnknown) {
+		t.Fatalf("error = %v, want unknown evidence", err)
 	}
 }
 
@@ -349,6 +429,11 @@ func TestTheProposedPatchNamesItsLane(t *testing.T) {
 	}
 	if !strings.Contains(frozen.DeploymentView(), "guarded lane") {
 		t.Errorf("deployment view:\n%s", frozen.DeploymentView())
+	}
+	for _, mapping := range []string{"low    -> fast", "medium -> standard", "high   -> guarded"} {
+		if !strings.Contains(frozen.DeploymentView(), mapping) {
+			t.Errorf("deployment view is missing %q:\n%s", mapping, frozen.DeploymentView())
+		}
 	}
 }
 

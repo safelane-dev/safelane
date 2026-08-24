@@ -110,6 +110,9 @@ type Observed struct {
 	AtGate bool
 	// Aborted is Argo's own abort, as opposed to a stop SafeLane asked for.
 	Aborted bool
+	// Restored proves Argo has returned exposure and ready capacity to the
+	// stable ReplicaSet; an aborted phase alone is not enough.
+	Restored bool
 }
 
 // Reconcile makes a stored record agree with the cluster.

@@ -138,6 +138,14 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			}
 			return c.Store.Finish(record, journal.StateCompleted, "released", "", c.now())
 		case journal.StateFailed:
+			if !observed.Restored {
+				record.State = journal.StateMonitoring
+				if err := c.Store.Save(record); err != nil {
+					return record, err
+				}
+				c.sleep()
+				continue
+			}
 			if hasEvent(record.Events, "stop") {
 				record, err = c.Store.Append(record, journal.Event{
 					At: c.now(), Kind: "restored", By: journal.ActorArgo,

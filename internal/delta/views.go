@@ -135,6 +135,12 @@ func (d ReleaseDelta) DeploymentView() string {
 		d.deployment.Rollout, d.deployment.Namespace, d.deployment.Context)
 	fmt.Fprintf(&b, "container    %s\n", d.deployment.Container)
 	fmt.Fprintf(&b, "exposure     %s\n", d.deployment.Mechanism)
+	if len(d.deployment.Lanes) > 0 {
+		b.WriteString("\nconfigured rollout by assessed risk\n")
+		for _, choice := range d.deployment.Lanes {
+			fmt.Fprintf(&b, "  %-6s -> %s (%s)\n", choice.Risk, choice.Lane, weights(choice.Weights))
+		}
+	}
 
 	patch := d.deployment.Patch
 	fmt.Fprintf(&b, "\nwill change  the image of container %d to %s\n", patch.ContainerIndex, patch.Image)

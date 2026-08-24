@@ -89,6 +89,49 @@ func TestGetStatus_ReportsGenerationAndArgoMessage(t *testing.T) {
 	}
 }
 
+func TestGetStatus_OnlyReportsRestoredAfterStableCapacityAndTrafficAreRestored(t *testing.T) {
+	cases := []struct {
+		name string
+		doc  string
+		want bool
+	}{
+		{
+			name: "restored",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":4,"updatedReplicas":0,"canary":{"weights":{"canary":{"weight":0}}}}}`,
+			want: true,
+		},
+		{
+			name: "canary traffic remains",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":4,"updatedReplicas":0,"canary":{"weights":{"canary":{"weight":10}}}}}`,
+		},
+		{
+			name: "updated replicas remain",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":4,"updatedReplicas":1,"canary":{"weights":{"canary":{"weight":0}}}}}`,
+		},
+		{
+			name: "stable capacity is not ready",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":3,"updatedReplicas":0,"canary":{"weights":{"canary":{"weight":0}}}}}`,
+		},
+		{
+			name: "replica restoration evidence is absent",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","canary":{"weights":{"canary":{"weight":0}}}}}`,
+		},
+	}
+	for _, test := range cases {
+		t.Run(test.name, func(t *testing.T) {
+			fr := &fakeRunner{}
+			fr.enqueue(test.doc, nil)
+			status, err := newTestExecutor(fr).GetStatus(context.Background())
+			if err != nil {
+				t.Fatalf("GetStatus: %v", err)
+			}
+			if status.Restored != test.want {
+				t.Fatalf("Restored = %t, want %t", status.Restored, test.want)
+			}
+		})
+	}
+}
+
 func TestGetStatus_CurrentWeight_FallsBackToTheLastCompletedStep(t *testing.T) {
 	// No trafficRouting weight reported (no nginx/istio in play); fall
 	// back to scanning steps up to currentStepIndex for the last

@@ -93,7 +93,18 @@ type DeploymentEvidence struct {
 	// uses. Names only, and on purpose: a name is enough for a deployment
 	// observation and a value is not.
 	SecretReferences []string `json:"secret_references,omitempty"`
-	Patch            Patch    `json:"patch"`
+	// Lanes tells the assessor exactly which configured rollout corresponds to
+	// each risk level. Without this frozen mapping an agent would have to guess
+	// a lane name that only the later validator could see.
+	Lanes []LaneChoice `json:"lanes"`
+	Patch Patch        `json:"patch"`
+}
+
+// LaneChoice is one configured risk-to-rollout mapping.
+type LaneChoice struct {
+	Risk    string `json:"risk"`
+	Lane    string `json:"lane"`
+	Weights []int  `json:"weights"`
 }
 
 // Patch is what SafeLane proposes to change, described rather than serialized.
@@ -262,6 +273,10 @@ func (d ReleaseDelta) Changes() ChangeSet { return copyChangeSet(d.changes) }
 func (d ReleaseDelta) Deployment() DeploymentEvidence {
 	out := d.deployment
 	out.SecretReferences = append([]string(nil), d.deployment.SecretReferences...)
+	out.Lanes = append([]LaneChoice(nil), d.deployment.Lanes...)
+	for index := range out.Lanes {
+		out.Lanes[index].Weights = append([]int(nil), d.deployment.Lanes[index].Weights...)
+	}
 	out.Patch.Weights = append([]int(nil), d.deployment.Patch.Weights...)
 	return out
 }
