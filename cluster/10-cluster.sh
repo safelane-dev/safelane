@@ -14,7 +14,11 @@ say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 
 say "minikube (profile ${PROFILE})"
 if ! minikube status -p "${PROFILE}" --format '{{.APIServer}}' 2>/dev/null | grep -q Running; then
-  minikube start -p "${PROFILE}" --cpus=4 --memory=4096
+  # Do not let minikube enable its default addons during startup. On a fresh
+  # Windows/Docker profile that callback can run before the API server is
+  # ready, producing OpenAPI connection-refused errors. Enable what we need
+  # explicitly after the readiness gate below.
+  minikube start -p "${PROFILE}" --cpus=4 --memory=4096 --addons=none
 else
   echo "already running"
 fi
@@ -44,6 +48,10 @@ wait_for_api() {
   done
 }
 wait_for_api
+
+say "minikube storage"
+minikube addons enable storage-provisioner -p "${PROFILE}"
+minikube addons enable default-storageclass -p "${PROFILE}"
 
 if [ "$(kubectl auth can-i '*' '*' 2>/dev/null)" != "yes" ]; then
   echo "the selected minikube context is not cluster-admin; refusing demo setup" >&2
