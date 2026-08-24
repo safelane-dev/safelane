@@ -336,7 +336,7 @@ func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.Relea
 	allowedFiles = append(allowedFiles, "handles.json")
 	prompt := fmt.Sprintf(`You are evaluating SafeLane's active assessment skill. Follow the Assess section below exactly.
 
-For this offline evaluation, use only the evidence files in your current directory. Open exactly one file per read operation. First use Get-Content -LiteralPath to open snapshot.txt, then changes.txt, deployment.txt, health.txt, and history.txt, in that order. snapshot.txt is the frozen snapshot ID the assessment must copy. handles.json maps each internal evidence handle to a controlled file. Open it and the mapped file only when a material assessment claim needs deeper evidence. Before claiming how a configured analysis covers a hazard, read its full-text handle when health.txt lists one. Do not list the directory, inspect the repository, or perform a general code review. Record the four view names in the order you read them, followed by the exact IDs of any evidence handles whose mapped files you actually opened. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
+For this offline evaluation, use only the evidence files in your current directory. Open exactly one file per read operation. First use Get-Content -LiteralPath to open snapshot.txt, then changes.txt, deployment.txt, health.txt, and history.txt, in that order. If any read reports a nonzero exit, retry that same file until the read succeeds before continuing. snapshot.txt is the frozen snapshot ID the assessment must copy. handles.json maps each internal evidence handle to a controlled file. Open it and the mapped file only when a material assessment claim needs deeper evidence. Before claiming how a configured analysis covers a hazard, read its full-text handle when health.txt lists one. Do not list the directory, inspect the repository, or perform a general code review. Record the four view names in the order you read them, followed by the exact IDs of any evidence handles whose mapped files you actually opened. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
 
 Return JSON only with this outer shape:
 {"views_read":["changes","deployment","health","history"],"investigated":[],"general_code_review":false,"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
@@ -453,42 +453,75 @@ func claudeResult(t *testing.T, transcript []byte) []byte {
 	return result
 }
 
-// observedToolTrace keeps only actual command/Read tool events. Prompt text
-// and the model's own report cannot satisfy this check.
+// observedToolTrace keeps only successfully completed command/Read tool events.
+// Prompt text, attempted calls, failures, and the model's own report cannot
+// satisfy this check.
 func observedToolTrace(transcript []byte) []string {
 	var trace []string
+	claudeUses := map[string]string{}
+	var claudeOrder []string
+	claudeSucceeded := map[string]bool{}
 	for _, line := range bytes.Split(transcript, []byte("\n")) {
 		var value any
 		if json.Unmarshal(line, &value) != nil {
 			continue
 		}
-		collectToolTrace(value, &trace)
+		collectToolEvents(value, &trace, claudeUses, &claudeOrder, claudeSucceeded)
+	}
+	for _, id := range claudeOrder {
+		if claudeSucceeded[id] {
+			trace = append(trace, claudeUses[id])
+		}
 	}
 	return trace
 }
 
-func collectToolTrace(value any, trace *[]string) {
+func collectToolEvents(value any, trace *[]string, claudeUses map[string]string, claudeOrder *[]string, claudeSucceeded map[string]bool) {
 	switch current := value.(type) {
 	case map[string]any:
 		if current["type"] == "command_execution" {
-			if command, ok := current["command"].(string); ok {
+			code, hasCode := current["exit_code"].(float64)
+			if command, ok := current["command"].(string); ok && hasCode && code == 0 && current["status"] == "completed" {
 				*trace = append(*trace, command)
 			}
 		}
 		if current["type"] == "tool_use" && current["name"] == "Read" {
-			if input, ok := current["input"].(map[string]any); ok {
-				if path, ok := input["file_path"].(string); ok {
-					*trace = append(*trace, path)
+			id, hasID := current["id"].(string)
+			if input, ok := current["input"].(map[string]any); ok && hasID {
+				if path, ok := input["file_path"].(string); ok && claudeUses[id] == "" {
+					claudeUses[id] = path
+					*claudeOrder = append(*claudeOrder, id)
 				}
 			}
 		}
+		if current["type"] == "tool_result" {
+			id, hasID := current["tool_use_id"].(string)
+			isError, _ := current["is_error"].(bool)
+			if hasID && !isError {
+				claudeSucceeded[id] = true
+			}
+		}
 		for _, child := range current {
-			collectToolTrace(child, trace)
+			collectToolEvents(child, trace, claudeUses, claudeOrder, claudeSucceeded)
 		}
 	case []any:
 		for _, child := range current {
-			collectToolTrace(child, trace)
+			collectToolEvents(child, trace, claudeUses, claudeOrder, claudeSucceeded)
 		}
+	}
+}
+
+func TestObservedToolTraceCountsOnlySuccessfulCompletedReads(t *testing.T) {
+	transcript := []byte(strings.Join([]string{
+		`{"type":"item.started","item":{"type":"command_execution","command":"pwsh.exe -Command 'Get-Content -LiteralPath .\\started.txt'","exit_code":null,"status":"in_progress"}}`,
+		`{"type":"item.completed","item":{"type":"command_execution","command":"pwsh.exe -Command 'Get-Content -LiteralPath .\\failed.txt'","exit_code":124,"status":"failed"}}`,
+		`{"type":"item.completed","item":{"type":"command_execution","command":"pwsh.exe -Command 'Get-Content -LiteralPath .\\changes.txt'","exit_code":0,"status":"completed"}}`,
+		`{"type":"assistant","message":{"content":[{"type":"tool_use","id":"read-ok","name":"Read","input":{"file_path":"C:\\\\safe\\\\health.txt"}},{"type":"tool_use","id":"read-bad","name":"Read","input":{"file_path":"C:\\\\safe\\\\secret.txt"}}]}}`,
+		`{"type":"user","message":{"content":[{"type":"tool_result","tool_use_id":"read-ok","is_error":false},{"type":"tool_result","tool_use_id":"read-bad","is_error":true}]}}`,
+	}, "\n"))
+	got := observedToolTrace(transcript)
+	if len(got) != 2 || !strings.Contains(got[0], "changes.txt") || !strings.Contains(got[1], "health.txt") {
+		t.Fatalf("successful trace = %v", got)
 	}
 }
 
@@ -580,10 +613,13 @@ func controlledEvidenceFile(read, evidenceDir string, allowed map[string]bool) (
 	// paths can fit this grammar.
 	marker := strings.Index(lower, " -command ")
 	prefix := strings.TrimSpace(read[:marker])
+	if strings.HasSuffix(strings.ToLower(prefix), " -noprofile") {
+		prefix = strings.TrimSpace(prefix[:len(prefix)-len(" -noprofile")])
+	}
 	if len(prefix) >= 2 && prefix[0] == '"' && prefix[len(prefix)-1] == '"' {
 		prefix = prefix[1 : len(prefix)-1]
 	}
-	if strings.ContainsAny(prefix, `"';&|`) || !strings.EqualFold(filepath.Base(prefix), "pwsh.exe") {
+	if !controlledPowerShell(prefix) {
 		return "", false
 	}
 	payload := strings.TrimSpace(read[marker+len(" -command "):])
@@ -603,6 +639,19 @@ func controlledEvidenceFile(read, evidenceDir string, allowed map[string]bool) (
 	return file, strings.EqualFold(filepath.Dir(path), filepath.Clean(evidenceDir)) && allowed[file]
 }
 
+func controlledPowerShell(prefix string) bool {
+	if strings.EqualFold(prefix, "pwsh.exe") {
+		return true
+	}
+	// A full executable path may contain spaces, but never shell expansion,
+	// control syntax, quotes, traversal, or line breaks.
+	if !filepath.IsAbs(prefix) || strings.Contains(prefix, "..") ||
+		strings.ContainsAny(prefix, "\"';&|$`\r\n%(){}<>#^!") {
+		return false
+	}
+	return strings.EqualFold(filepath.Base(filepath.Clean(prefix)), "pwsh.exe")
+}
+
 func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 	dir := filepath.Join("C:\\", "safe-eval")
 	allowed := map[string]bool{"changes.txt": true, "handles.json": true}
@@ -610,6 +659,7 @@ func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 		filepath.Join(dir, "changes.txt"),
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
 		`"C:\Program Files\PowerShell\7\pwsh.exe" -Command 'Get-Content -LiteralPath .\changes.txt'`,
+		`"C:\Program Files\PowerShell\7\pwsh.exe" -NoProfile -Command "Get-Content -LiteralPath 'changes.txt'"`,
 	} {
 		if _, ok := controlledEvidenceFile(read, dir, allowed); !ok {
 			t.Errorf("controlled read was rejected: %q", read)
@@ -623,6 +673,9 @@ func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt # allowed"`,
 		`pwsh.exe -Command "Get-Content -LiteralPath $(Get-ChildItem)"`,
 		`whoami; pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
+		`$env:TEMP\pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
+		"whoami`nC:\\safe\\pwsh.exe -Command \"Get-Content -LiteralPath .\\changes.txt\"",
+		`%TEMP%\pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
 		`git diff -- changes.txt`,
 		`pwsh.exe -Command "Get-Content .\unknown.json"`,
 	} {
