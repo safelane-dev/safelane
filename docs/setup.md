@@ -7,7 +7,7 @@ SafeLane registers an existing Argo canary. It does not create Kubernetes resour
 - A GitHub origin.
 - Read access to one Kubernetes namespace.
 - An Argo canary Rollout with inline containers.
-- Stable and canary Services.
+- Stable and canary Services when the Rollout uses traffic routing.
 - A background AnalysisTemplate.
 - A traceable OCI image.
 

@@ -25,7 +25,7 @@ safelane version
 
 ## Build from source
 
-SafeLane requires Go 1.26.5 or a later version.
+SafeLane requires Go 1.26.6 or a later version.
 
 ```bash
 git clone https://github.com/AndrewMaged814/safelane.git

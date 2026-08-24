@@ -27,9 +27,6 @@ type Eligibility struct {
 	// Notices are things worth reporting that do not stop a release - most
 	// often that the default branch requires no checks at all.
 	Notices []string `json:"notices,omitempty"`
-	// ConfirmedRun is the workflow run a person confirmed produced the
-	// container, when one was needed.
-	ConfirmedRun int64 `json:"confirmed_run,omitempty"`
 }
 
 // Blocker is one reason a release is not eligible.
@@ -62,12 +59,6 @@ type EligibilityInput struct {
 	// Comparison is deployed...candidate, for the ordering and relatedness
 	// rules.
 	Comparison Comparison
-	// ConfirmedRun is the workflow run the user confirmed produced the
-	// container, when branch protection required no checks and provenance
-	// could not identify one. It is release-scoped evidence, never
-	// configuration: the next release asks again, because the next release is
-	// a different build.
-	ConfirmedRun int64
 }
 
 // EvaluateEligibility applies every rule at once and reports all of them.
@@ -75,7 +66,7 @@ type EligibilityInput struct {
 // All of them, not the first: a person whose build failed and whose branch has
 // no protection would rather learn both now than one per attempt.
 func EvaluateEligibility(in EligibilityInput) Eligibility {
-	result := Eligibility{ConfirmedRun: in.ConfirmedRun}
+	result := Eligibility{}
 
 	result.blockCandidate(in)
 	result.blockDeployed(in)
@@ -219,10 +210,10 @@ func (e *Eligibility) blockChecks(in EligibilityInput) {
 //  1. The container's provenance names the run. Nothing to ask.
 //  2. Branch protection already required the checks, and they passed. The
 //     required checks are the answer.
-//  3. Neither. SafeLane lists the successful runs for the exact candidate and
-//     asks which one produced this container. That answer is stored with the
-//     release, not as configuration, because the next release is a different
-//     build and deserves the same question.
+//  3. One successful run exists for the exact revision already bound by OCI
+//     metadata. In the POC's trusted-pipeline boundary, it is unambiguous.
+//  4. Multiple runs remain. SafeLane lists them and requires stronger
+//     provenance rather than inventing a producer.
 func (e *Eligibility) blockBuild(in EligibilityInput) {
 	if in.ArtifactSource.Method == oci.BindingCIProvenance {
 		return
@@ -239,21 +230,13 @@ func (e *Eligibility) blockBuild(in EligibilityInput) {
 			"Wait for the build to finish, or fix it.")
 		return
 	}
-	if in.ConfirmedRun == 0 {
-		e.block("build_not_confirmed",
-			fmt.Sprintf("%s has %s that could have produced this container, and SafeLane cannot tell which one did.",
-				short(in.Candidate.Revision.SHA), runCount(len(successful))),
-			"Confirm which run produced it: "+describeRuns(successful)+".")
+	if len(successful) == 1 {
 		return
 	}
-	for _, run := range successful {
-		if run.ID == in.ConfirmedRun {
-			return
-		}
-	}
-	e.block("confirmed_build_not_found",
-		fmt.Sprintf("Run %d is not a successful run for %s.", in.ConfirmedRun, short(in.Candidate.Revision.SHA)),
-		"Confirm one of: "+describeRuns(successful)+".")
+	e.block("build_provenance_ambiguous",
+		fmt.Sprintf("%s has %s that could have produced this container, and SafeLane cannot prove which one did.",
+			short(in.Candidate.Revision.SHA), runCount(len(successful))),
+		"Publish provenance that identifies the producing workflow. Candidates: "+describeRuns(successful)+".")
 }
 
 // Rejection turns an ineligible result into the typed error the rest of

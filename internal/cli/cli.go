@@ -11,6 +11,11 @@
 // convention.
 package cli
 
+import (
+	"fmt"
+	"io"
+)
+
 // Exit codes follow the Unix convention an agent can branch on without parsing
 // output.
 //
@@ -24,3 +29,8 @@ const (
 	ExitUsage    = 2
 	ExitDecision = 4
 )
+
+func writeResultError(stderr io.Writer, command string, err error) int {
+	fmt.Fprintf(stderr, "safelane %s: %v\n", command, err)
+	return ExitFail
+}

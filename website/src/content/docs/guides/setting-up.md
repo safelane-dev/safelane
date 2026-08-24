@@ -10,7 +10,7 @@ You need:
 - an application repository with a GitHub origin;
 - a kubeconfig context that can read one namespace;
 - an Argo canary Rollout with inline containers;
-- stable and canary Services;
+- stable and canary Services when the Rollout uses traffic routing;
 - a background AnalysisTemplate;
 - a traceable OCI image.
 

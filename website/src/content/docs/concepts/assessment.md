@@ -3,7 +3,8 @@ title: Assessment & Recommendation
 description: Learn how SafeLane recommends proceed or wait.
 ---
 
-SafeLane assesses one release. It does not review general code quality.
+The active coding agent assesses one release through the SafeLane skill.
+SafeLane validates the result. This is not a general code-quality review.
 
 ## Eligibility
 
@@ -29,7 +30,7 @@ The agent can open more evidence for a specific question. It asks you one questi
 
 ## Recommendation
 
-**Proceed** means that a configured release lane can control the identified hazards.
+**Proceed** means the assessed hazards support one configured release lane.
 
 **Wait** means that evidence is missing or a health check does not cover a credible hazard.
 

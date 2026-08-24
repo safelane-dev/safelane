@@ -5,7 +5,7 @@ description: Files that SafeLane stores for release history and proof.
 
 ```text
 ~/.safelane/apps/<application>/environments/<environment>/history.jsonl
-~/.safelane/apps/<application>/environments/<environment>/releases/<attempt>/
+~/.safelane/apps/<application>/environments/<environment>/releases/<attempt>.json
 ```
 
 ## History
@@ -20,7 +20,7 @@ Each attempt stores:
 - Release Recommendation;
 - Release Patch;
 - execution events;
-- Release Proof.
+- Approval and execution events.
 
 SafeLane does not store chats, credentials, secret values, or abandoned drafts.
 

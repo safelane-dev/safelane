@@ -185,7 +185,6 @@ func TestMissingBranchProtectionIsReportedNotBlocked(t *testing.T) {
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 	}
-	in.ConfirmedRun = 42
 
 	result := github.EvaluateEligibility(in)
 	if !result.Eligible {
@@ -204,7 +203,6 @@ func TestAProtectedBranchWithNoRequiredChecksIsReported(t *testing.T) {
 	in.Checks.Workflows = []github.WorkflowRun{
 		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
 	}
-	in.ConfirmedRun = 42
 
 	result := github.EvaluateEligibility(in)
 	if !result.Eligible {
@@ -228,9 +226,21 @@ func TestProvenanceIdentifiesTheProducingRunWithoutAsking(t *testing.T) {
 	}
 }
 
-// Without provenance, SafeLane lists the successful runs for the exact
-// candidate and asks which one produced the container.
-func TestWithoutProvenanceTheUserConfirmsWhichRunProducedIt(t *testing.T) {
+func TestOneSuccessfulRunForTheBoundRevisionNeedsNoUserConfirmation(t *testing.T) {
+	in := eligible()
+	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
+	in.Checks.Workflows = []github.WorkflowRun{
+		{ID: 42, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
+	}
+
+	result := github.EvaluateEligibility(in)
+	if !result.Eligible {
+		t.Fatalf("the only successful exact-revision run was treated as ambiguous: %s", blockerCodes(result))
+	}
+}
+
+// Without provenance, multiple successful runs remain ambiguous.
+func TestWithoutProvenanceMultipleRunsRequireBetterProvenance(t *testing.T) {
 	in := eligible()
 	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
 	in.Checks.Workflows = []github.WorkflowRun{
@@ -239,7 +249,7 @@ func TestWithoutProvenanceTheUserConfirmsWhichRunProducedIt(t *testing.T) {
 		{ID: 43, Name: "lint", Status: "completed", Conclusion: "failure", HeadSHA: headSHA},
 	}
 
-	blocker := assertBlocker(t, github.EvaluateEligibility(in), "build_not_confirmed")
+	blocker := assertBlocker(t, github.EvaluateEligibility(in), "build_provenance_ambiguous")
 	if !strings.Contains(blocker.Remedy, "run 41") || !strings.Contains(blocker.Remedy, "run 42") {
 		t.Errorf("the question should list the candidates: %q", blocker.Remedy)
 	}
@@ -247,23 +257,6 @@ func TestWithoutProvenanceTheUserConfirmsWhichRunProducedIt(t *testing.T) {
 		t.Errorf("a failed run was offered as a candidate: %q", blocker.Remedy)
 	}
 
-	// The confirmation is release-scoped: it is an input to this evaluation,
-	// not something written into configuration.
-	in.ConfirmedRun = 42
-	if result := github.EvaluateEligibility(in); !result.Eligible {
-		t.Fatalf("confirming the run did not unblock: %s", blockerCodes(result))
-	}
-}
-
-func TestConfirmingARunThatDidNotSucceedIsRefused(t *testing.T) {
-	in := eligible()
-	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
-	in.Checks.Workflows = []github.WorkflowRun{
-		{ID: 41, Name: "build-and-push", Status: "completed", Conclusion: "success", HeadSHA: headSHA},
-	}
-	in.ConfirmedRun = 99
-
-	assertBlocker(t, github.EvaluateEligibility(in), "confirmed_build_not_found")
 }
 
 func TestNoSuccessfulBuildIsBlocked(t *testing.T) {

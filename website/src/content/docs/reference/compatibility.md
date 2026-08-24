@@ -8,7 +8,7 @@ description: Check if SafeLane can register your application.
 - A GitHub repository.
 - Read access to one Kubernetes namespace.
 - An Argo canary Rollout with inline containers.
-- Stable and canary Services.
+- Stable and canary Services when the Rollout names them.
 - At least one background AnalysisTemplate.
 - An OCI-compatible image registry.
 - Proof that links the candidate image to its source revision.
