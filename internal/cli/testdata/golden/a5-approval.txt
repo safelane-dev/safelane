@@ -1,0 +1,5 @@
+I will change the container image and the canary steps. Your probes, resources, replicas,
+environment, secrets, ports, Services, traffic router, and health analysis stay exactly as
+they are.
+
+Proceed with this rollout to production?

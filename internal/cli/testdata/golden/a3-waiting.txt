@@ -1,0 +1,17 @@
+I recommend waiting on this release.
+
+What concerns me
+This change alters how payments-api writes to its database, and the schema migration runs
+during start-up of the new version. If it fails part-way, the stable version cannot read
+the rows that were already migrated.
+
+What I could not confirm
+Whether the migration has been run against production-sized data.
+
+What your health analysis would not catch
+Your configured analysis measures request success rate over two minutes. A migration that
+completes but leaves rows unreadable would not appear there.
+
+Next step
+Run the migration as a separate job before this release, or tell me it already ran and I
+will reassess.

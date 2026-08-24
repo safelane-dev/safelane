@@ -1,0 +1,18 @@
+I recommend proceeding with this release.
+
+Why it looks ready
+✓ The version you want to release passed its required build and test checks.
+✓ The container prepared for deployment came from that successful build.
+✓ I reviewed everything changed since the currently running version and found nothing requiring additional release precautions.
+
+Proposed rollout
+Release to 50%, verify the configured health analysis, then continue to 100%.
+Using your fast lane.
+
+SafeLane will stay with the rollout. If the checks fail, Argo will stop it and restore the stable version.
+
+I will change the container image and the canary steps. Your probes, resources, replicas,
+environment, secrets, ports, Services, traffic router, and health analysis stay exactly as
+they are.
+
+Proceed with this rollout to production?
