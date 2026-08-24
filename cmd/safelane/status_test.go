@@ -17,8 +17,13 @@ func TestNoArgumentsPrintsPrimaryWorkflowHelpAndSucceeds(t *testing.T) {
 	}
 }
 
+// `status` and `proof` were on this list because they had been deleted. They
+// exist again on the new command surface (decision 11), where `status
+// production` and `proof production` are real commands that resolve the active
+// release from the Application and Environment. A command that exists is not a
+// usage error, so they are no longer tested as one.
 func TestDeletedCommandsAreOrdinaryUsageErrors(t *testing.T) {
-	for _, args := range [][]string{{"init"}, {"rollout", "start"}, {"status"}, {"proof", "rel_01"}, {"release", "inspect"}, {"release", "--pr", "1"}, {"setup", "apply", "--proposal", "proposal.json", "--yes"}, {"demo", "up"}, {"demo", "down"}} {
+	for _, args := range [][]string{{"init"}, {"rollout", "start"}, {"release", "inspect"}, {"release", "--pr", "1"}, {"setup", "apply", "--proposal", "proposal.json", "--yes"}, {"demo", "up"}, {"demo", "down"}} {
 		var stdout, stderr bytes.Buffer
 		if code := run(args, &stdout, &stderr); code != 2 {
 			t.Errorf("%v exit = %d, want 2", args, code)

@@ -2,6 +2,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -140,7 +141,54 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.AddCommand(releaseGroup(rt), completionCommand(root), versionCommand())
 	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectReleaseCommand(rt),
 		recommendCommand(rt), runReleaseCommand(rt))
+	root.AddCommand(naturalControls(rt)...)
 	return root
+}
+
+// naturalControls are the five commands that address a release in progress.
+// None takes an identifier: there is one active release per Application and
+// Environment, so the pair resolves it. A person who has to look up an
+// identifier to stop a rollout is a person who will not stop it in time.
+func naturalControls(rt commandRuntime) []*cobra.Command {
+	controls := func(cmd *cobra.Command, args []string) cli.ControlOptions {
+		forceJSON, _ := cmd.Flags().GetBool("json")
+		details, _ := cmd.Flags().GetBool("details")
+		home, _ := config.Home()
+		reason := ""
+		if len(args) > 1 {
+			reason = strings.Join(args[1:], " ")
+		}
+		return cli.ControlOptions{
+			Root: rt.root, Home: home, Environment: args[0],
+			App: rt.app, ForceJSON: forceJSON, Reason: reason, Details: details,
+		}
+	}
+	leaf := func(use, short string, args cobra.PositionalArgs,
+		run func(context.Context, cli.ControlOptions, io.Writer, io.Writer) int) *cobra.Command {
+
+		cmd := &cobra.Command{
+			Use: use, Short: short, Args: args,
+			RunE: func(cmd *cobra.Command, argv []string) error {
+				if code := run(cmd.Context(), controls(cmd, argv), rt.stdout, rt.stderr); code != cli.ExitOK {
+					return exitError{code: code}
+				}
+				return nil
+			},
+		}
+		cmd.Flags().Bool("json", false, "force machine output at a terminal")
+		return cmd
+	}
+
+	proof := leaf("proof <env> [--details]", "Show what happened", cobra.ExactArgs(1), cli.Proof)
+	proof.Flags().Bool("details", false, "open the full record for this release")
+
+	return []*cobra.Command{
+		leaf("status [<env>]", "Say where the release is and what it is waiting for", cobra.ExactArgs(1), cli.Status),
+		leaf("hold <env> <reason>", "Hold the rollout where it is", cobra.MinimumNArgs(2), cli.Hold),
+		leaf("continue <env> <reason>", "Continue a held rollout", cobra.MinimumNArgs(2), cli.Continue),
+		leaf("stop <env> <reason>", "Stop the rollout and restore the stable version", cobra.MinimumNArgs(2), cli.Stop),
+		proof,
+	}
 }
 
 // runReleaseCommand releases what is awaiting approval. There is no --yes: at a

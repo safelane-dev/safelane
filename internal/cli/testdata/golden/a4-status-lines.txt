@@ -1,0 +1,8 @@
+assessing          Reading everything changed since the running version.
+awaiting_approval  Waiting for you to approve the rollout to production.
+applying           Applying the approved image and canary steps.
+monitoring         At 50%. Waiting for the next health measurement.
+paused             Held at 25% at your request: "waiting for the on-call handover".
+completed          Released at 100%. Stable since 14:12.
+failed             Argo stopped the rollout at 50% and restored the stable version.
+stopped            Stopped at your request: "customer reported errors". Stable version restored.
