@@ -6,7 +6,7 @@ const dist = new URL("../dist/", import.meta.url);
 const docs = new URL("../src/content/docs/", import.meta.url);
 const canonicalOrigin = "https://andrewmaged814.github.io";
 const canonicalBase = "/safelane";
-const canonicalHome = `${canonicalOrigin}${canonicalBase}/`;
+const baseHome = `${canonicalBase}/`;
 
 async function findHtmlFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
@@ -40,8 +40,8 @@ for (const file of htmlFiles) {
   const siteTitle = html.match(/<a href="([^"]+)" class="site-title\b/);
   if (siteTitle) {
     siteTitleCount += 1;
-    if (siteTitle[1] !== canonicalHome) {
-      throw new Error(`${file} has a non-canonical site title link: ${siteTitle[1]}`);
+    if (siteTitle[1] !== baseHome) {
+      throw new Error(`${file} has an invalid site title link: ${siteTitle[1]}`);
     }
   }
 

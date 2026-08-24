@@ -1,49 +1,34 @@
 ---
-title: Release Record Schema
-description: The persisted JSON shape behind Release Proof.
+title: Release Data
+description: Files that SafeLane stores for release history and proof.
 ---
 
-## A release ID without a record is only a label
+```text
+~/.safelane/apps/<application>/environments/<environment>/history.jsonl
+~/.safelane/apps/<application>/environments/<environment>/releases/<attempt>/
+```
 
-SafeLane persists a record for every release attempt, including failed and indeterminate checks.
+## History
 
-    {
-      "schema_version": "...",
-      "release_id": "rel_...",
-      "created_at": "...",
-      "request": {},
-      "target": {},
-      "caller": {},
-      "evidence": {},
-      "bundle": {},
-      "eligibility": {},
-      "assessment": {},
-      "execution": [],
-      "boundary": {},
-      "envelope": {},
-      "outcome": "..."
-    }
+Each history item has the time, candidate, recommendation, lane, one reason, and outcome. Assessment reads up to ten recent items.
 
-| Section | Records |
-| --- | --- |
-| request | Release intent, pull request, environment, and caller metadata. |
-| evidence | Verified repository, pull request, required check, and artifact. |
-| bundle | Template identity, target, pinned digest, rendered resources, hashes, and bundle digest. |
-| eligibility | Status, policy version, reason code, retryability, and rollout envelope. |
-| assessment | Facts, heuristic verdict, model verdict, combined risk, and lane. |
-| execution | Timestamp, verb, requested weight, outcome, analysis, reason code, and detail. |
-| boundary | Caller identity, controller identity, and caller capability. |
-| envelope | Lane, weights, gates, source, and template digest. |
+## Release attempt
 
-Read it through proof, proof --details, or proof --json. Proof reports what SafeLane recorded for that release.
+Each attempt stores:
 
-## Why the record keeps failed attempts
+- Release Delta;
+- Release Recommendation;
+- Release Patch;
+- execution events;
+- Release Proof.
 
-An ineligible release is still an operational fact. Keeping the attempt makes the refusal inspectable and prevents a caller from manufacturing a clean history by retrying until a later command succeeds.
+SafeLane does not store chats, credentials, secret values, or abandoned drafts.
 
-## Next
+```bash
+safelane proof <env>
+safelane proof <env> --details
+```
 
-- [The Release Record & Proof](../concepts/record-and-proof/)
-- [CLI Command Reference](./cli/)
-- [Exit Codes](./exit-codes/)
+The first command shows a compact result. The second command shows frozen evidence and events.
 
+Next: [History and proof](../concepts/record-and-proof/).

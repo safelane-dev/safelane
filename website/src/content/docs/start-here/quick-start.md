@@ -1,39 +1,44 @@
 ---
 title: Quick Start
-description: Approve one exact Safety Contract and let SafeLane coordinate the release.
+description: See one SafeLane release from registration to proof.
 ---
 
-## Install and set up
+This example uses `payments-api`. The application already has an Argo canary Rollout and background health analysis.
 
-From the application repository:
+## 1. Register the application
 
-```bash
-safelane setup
-safelane doctor
-```
+Ask your coding agent:
 
-Provision a cluster with Argo Rollouts, a traffic router and a metrics provider before running doctor. SafeLane does not create or own clusters.
+> Register this application in production.
 
-## Release one exact merged PR
+Select the Rollout and container. SafeLane writes one `safelane.yml` file.
 
-```bash
-safelane release plan --pr 42
-safelane release run rel_...
-safelane release proof rel_...
-```
+<figure class="terminal-figure">
+  <img src="/safelane/examples/registration-example.png" alt="SafeLane registers payments-api in production and shows its release boundary." />
+</figure>
 
-Planning performs no production mutation. It verifies the merge commit, CI, and immutable image; combines deterministic and semantic assessment; connects cited hazards to concrete canary assertions; freezes the lane, authority, and rendered bundle; and returns the exact run command.
+## 2. Request a release
 
-Running shows that frozen contract and asks once. It then stays attached while Argo runs canary-only Analysis Jobs and traffic progression. Argo aborts and restores stable traffic on analysis failure; SafeLane reconciles and records that outcome.
+> Deploy payments-api to production.
 
-Another decision is requested only when the frozen contract identifies a specific uncovered hazard and policy permits explicit acceptance.
+SafeLane checks the candidate, CI result, OCI image, running version, and target. It then assesses all changes since the running version.
 
-## Agent/CI form
+## 3. Approve the recommendation
 
-```bash
-safelane release plan --pr 42 --json
-safelane release run rel_... --yes --json
-safelane release proof rel_... --json
-```
+SafeLane recommends **proceed** or **wait**. A proceed recommendation shows the rollout steps and health analysis.
 
-The agent never searches for the “latest PR,” never chooses arbitrary weights, and never loops over gate commands. Re-running `release run` safely reconnects and reconciles before acting.
+<figure class="terminal-figure">
+  <img src="/safelane/examples/recommendation-example.png" alt="SafeLane recommends a 50 to 100 percent rollout and asks for approval." />
+</figure>
+
+Approve the final question. The approval is valid for this release only.
+
+## 4. Follow the release
+
+SafeLane changes the selected image and canary steps. It waits for new health results at each pause. Argo controls failure, abort, and rollback.
+
+<figure class="terminal-figure">
+  <img src="/safelane/examples/proof-example.png" alt="SafeLane completes the release and shows proof for payments-api." />
+</figure>
+
+You can now [register your application](../../guides/setting-up/) or [run the local demo](../../guides/local-demo/).

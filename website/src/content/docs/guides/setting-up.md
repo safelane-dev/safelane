@@ -1,34 +1,37 @@
 ---
-title: Setting Up an Application
-description: Create the operator-owned SafeLane application configuration.
+title: Register an Application
+description: Register one existing Argo canary Rollout.
 ---
 
-## A repository cannot safely infer its production target
+## Requirements
 
-The caller's checkout does not own the cluster, namespace, rollout, policy, or controller credential. Letting it infer those values turns local context into production authority.
+You need:
 
-Run deterministic setup from the application repository:
+- an application repository with a GitHub origin;
+- a kubeconfig context that can read one namespace;
+- an Argo canary Rollout with inline containers;
+- stable and canary Services;
+- a background AnalysisTemplate;
+- a traceable OCI image.
 
-    safelane setup
+See [Compatibility](../reference/compatibility/) for all requirements.
 
-SafeLane creates operator-owned files under ~/.safelane/apps/safelane-demo-api/:
+## Register
 
-    project.yml
-    policy.yml
-    release-template/
-    releases/
+From the application repository, ask:
 
-The project file names the GitHub repository, default branch, image repository and tag, mandatory checks, target cluster, namespace, Rollout, template path, and controller credentials. Edit the operator-owned files, then run doctor.
+> Register this application in production.
 
-## Why configuration lives under SAFELANE_HOME
+Select the Environment, Rollout, and container. SafeLane validates the Services and health analysis.
 
-SafeLane keeps application configuration and records outside the application checkout. A caller can identify the repository, but it cannot rewrite the operator's policy by changing a working tree file.
+SafeLane shows `safelane.yml` before it writes the file to:
 
-For this prototype, `releases/rel_*.json` is the authoritative single-machine ledger. Each file is one attempt and updates land atomically. Shared-machine synchronization and concurrent SafeLane writers are unsupported.
+```text
+~/.safelane/apps/<application>/safelane.yml
+```
 
-## Next
+Registration does not create or change Kubernetes resources.
 
-- [Configuration File Schemas](../reference/configuration/)
-- [Pre-flight Checks](./pre-flight/)
-- [Running a Release End to End](./release-end-to-end/)
+Run registration again after a target change. SafeLane shows the difference and preserves the `policy` block.
 
+Next: [Run a release](./release-end-to-end/).

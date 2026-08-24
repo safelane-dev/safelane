@@ -9,6 +9,8 @@ export default defineConfig({
     mermaid({ enableLog: false }),
     starlight({
       title: "SafeLane",
+      description: "Autonomous progressive delivery for coding agents on Argo Rollouts.",
+      favicon: "/safelane/favicon.png",
       customCss: ["./src/styles/custom.css"],
       components: {
         SiteTitle: "./src/components/SiteTitle.astro"
@@ -18,28 +20,31 @@ export default defineConfig({
       },
       sidebar: [
         { label: "Start Here", items: [
-          { label: "Introduction", slug: "start-here/introduction" },
+          { label: "What is SafeLane?", slug: "start-here/introduction" },
           { label: "Quick Start", slug: "start-here/quick-start" },
           { label: "Installation", slug: "start-here/installation" }
         ] },
-        { label: "Concepts", items: [
-          { label: "The Release Policy", slug: "concepts/release-policy" },
-          { label: "Assessment", slug: "concepts/assessment" },
-          { label: "The Boundary", slug: "concepts/boundary" },
-          { label: "The Release Record & Proof", slug: "concepts/record-and-proof" }
+        { label: "How It Works", collapsed: true, items: [
+          { label: "Release Lifecycle", slug: "concepts/release-lifecycle" },
+          { label: "Assessment & Recommendation", slug: "concepts/assessment" },
+          { label: "Approval Boundary", slug: "concepts/boundary" },
+          { label: "Release Lanes", slug: "concepts/release-policy" },
+          { label: "History & Proof", slug: "concepts/record-and-proof" }
         ] },
-        { label: "Guides", items: [
-          { label: "Setting Up an Application", slug: "guides/setting-up" },
-          { label: "Running a Release End to End", slug: "guides/release-end-to-end" },
-          { label: "Handling a Paused or Aborted Rollout", slug: "guides/rollout-recovery" },
-          { label: "Pre-flight Checks", slug: "guides/pre-flight" },
-          { label: "Installing the Agent Skill", slug: "guides/agent-skill" }
+        { label: "Guides", collapsed: true, items: [
+          { label: "Register an Application", slug: "guides/setting-up" },
+          { label: "Run a Release", slug: "guides/release-end-to-end" },
+          { label: "Monitor & Control", slug: "guides/rollout-recovery" },
+          { label: "Run the Local Demo", slug: "guides/local-demo" },
+          { label: "Use the Agent Skill", slug: "guides/agent-skill" }
         ] },
-        { label: "Reference", items: [
-          { label: "CLI Command Reference", slug: "reference/cli" },
-          { label: "Configuration File Schemas", slug: "reference/configuration" },
+        { label: "Reference", collapsed: true, items: [
+          { label: "CLI", slug: "reference/cli" },
+          { label: "Configuration", slug: "reference/configuration" },
+          { label: "Compatibility", slug: "reference/compatibility" },
           { label: "Exit Codes", slug: "reference/exit-codes" },
-          { label: "Release Record Schema", slug: "reference/release-record" }
+          { label: "Release Data", slug: "reference/release-record" },
+          { label: "Roadmap", slug: "roadmap" }
         ] }
       ]
     })

@@ -1,38 +1,40 @@
 ---
-title: Introduction
-description: The problem SafeLane solves and the release path it owns.
+title: What is SafeLane?
+description: Learn what SafeLane does and where its authority stops.
 ---
 
-## Deployment agents have the wrong kind of freedom
+SafeLane releases software through an existing Argo canary Rollout.
 
-An agent can see a failed canary and ask for more rollout. If it also chooses the risk, lane, and credential, the guardrail is only a suggestion.
+It gives a coding agent the facts and controls for one release. The agent does not build a new release process in each chat.
 
-SafeLane splits the job. You give it a merged pull request. It verifies GitHub and GHCR evidence, renders operator-owned Kubernetes YAML, chooses a policy lane, and calls the rollout controller with a bounded envelope.
+## What SafeLane does
 
-```mermaid
-flowchart LR
-  A["Release Request"] --> B["Verify GitHub + GHCR"]
-  B --> C["Render trusted bundle"]
-  C --> D["Assess and choose lane"]
-  D --> E["Start or advance Argo"]
-  E --> F["Record proof"]
+SafeLane:
+
+- identifies the exact source revision and OCI image;
+- compares the candidate with the version that runs now;
+- checks CI, the target, and release history;
+- recommends **proceed** or **wait**;
+- shows the canary steps and health checks;
+- asks for one release approval;
+- monitors Argo until the release stops or completes;
+- stores release proof.
+
+## The approval boundary
+
+Your approval applies to one candidate, target, and patch. SafeLane cancels the approval if one of these facts changes.
+
+SafeLane changes only:
+
+```text
+the selected container image
+the Argo canary steps
 ```
 
-The caller cannot name its own risk or lane. It cannot send Kubernetes configuration. It cannot use the controller credential. Kubernetes denies direct changes from the restricted caller identity.
+Argo evaluates health. Argo also controls abort and rollback.
 
-| Before SafeLane | After SafeLane |
-| --- | --- |
-| A caller claims that an image is reviewed and safe. | SafeLane checks the merged commit, publish check, and immutable GHCR digest. |
-| A caller chooses a rollout weight. | The policy lane supplies the next weight. |
-| Release facts live in logs and chat. | <code>safelane release proof &lt;release-id&gt;</code> reads the persisted record. |
+## What SafeLane does not do
 
-## Why the caller cannot submit risk
+SafeLane does not provision Kubernetes. It does not replace code review. It does not claim that code is safe.
 
-Risk changes what the system is allowed to do. Letting the caller submit it lets the caller submit the decision. SafeLane accepts release identity and metadata, then derives risk from operator rules and verified evidence.
-
-## Next
-
-- [Quick Start](./quick-start/)
-- [Assessment](../concepts/assessment/)
-- [The Boundary](../concepts/boundary/)
-
+Next: [See a release](./quick-start/) or [check compatibility](../reference/compatibility/).
