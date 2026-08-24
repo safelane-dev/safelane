@@ -1,7 +1,7 @@
 ---
 const { siteTitle } = Astro.locals.starlightRoute;
 const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-const homeHref = new URL(`${base}/`, Astro.site).href;
+const homeHref = `${base}/`;
 ---
 
 <a href={homeHref} class="site-title sl-flex">
