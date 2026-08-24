@@ -118,12 +118,6 @@ func (d ReleaseDelta) ChangesView() string {
 	for _, pr := range d.changes.PullRequests {
 		fmt.Fprintf(&b, "  #%d  %s\n", pr.Number, firstNonEmpty(pr.Title, pr.Branch))
 	}
-	if len(d.changes.Diffs) > 0 {
-		b.WriteString("\nRaw diffs load on request:\n")
-		for _, handle := range d.changes.Diffs {
-			fmt.Fprintf(&b, "  %s  %s\n", handle.ID, handle.Summary)
-		}
-	}
 	return b.String()
 }
 
@@ -218,7 +212,6 @@ func (d ReleaseDelta) HistoryView() string {
 // sorted, so a caller can see what it could ask for.
 func (d ReleaseDelta) Handles() []Handle {
 	var handles []Handle
-	handles = append(handles, d.changes.Diffs...)
 	for _, objective := range d.health {
 		if objective.Body != nil {
 			handles = append(handles, *objective.Body)

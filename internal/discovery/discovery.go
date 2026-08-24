@@ -355,19 +355,33 @@ func redactAnalysisSecrets(value any) {
 	switch current := value.(type) {
 	case map[string]any:
 		for key, child := range current {
-			lower := strings.ToLower(key)
-			if strings.Contains(lower, "secret") || strings.Contains(lower, "token") ||
-				strings.Contains(lower, "password") || strings.Contains(lower, "credential") ||
-				strings.Contains(lower, "header") || strings.Contains(lower, "apikey") || strings.Contains(lower, "api_key") {
-				current[key] = "[omitted]"
-				continue
+			switch child.(type) {
+			case map[string]any, []any:
+				redactAnalysisSecrets(child)
+			default:
+				// Only scalar fields whose AnalysisTemplate semantics SafeLane
+				// understands may retain values. Unknown/provider configuration,
+				// argument values, URLs, queries, and headers retain their shape
+				// but never their application-owned contents.
+				if !safeAnalysisScalar(key) {
+					current[key] = "[omitted]"
+				}
 			}
-			redactAnalysisSecrets(child)
 		}
 	case []any:
 		for _, child := range current {
 			redactAnalysisSecrets(child)
 		}
+	}
+}
+
+func safeAnalysisScalar(key string) bool {
+	switch key {
+	case "name", "metricName", "interval", "initialDelay", "successCondition", "failureCondition",
+		"failureLimit", "inconclusiveLimit", "consecutiveErrorLimit", "count":
+		return true
+	default:
+		return false
 	}
 }
 

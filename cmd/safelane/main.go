@@ -131,8 +131,8 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	return root
 }
 
-// evidenceCommand is an agent adapter for loading a content-addressed source
-// diff only when the assessment needs more detail than the four compact views.
+// evidenceCommand loads typed, content-addressed health evidence only when the
+// assessment needs more detail than the four compact views.
 func evidenceCommand(rt commandRuntime) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:    "evidence <env> <handle>",
@@ -146,7 +146,7 @@ func evidenceCommand(rt commandRuntime) *cobra.Command {
 			}
 			return exit(cli.Evidence(cmd.Context(), cli.EvidenceOptions{
 				Root: rt.root, Home: home, Application: rt.app, Environment: args[0], HandleID: args[1],
-				Origin: discovery.GitHubOrigin, Source: &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
+				Origin: discovery.GitHubOrigin,
 			}, rt.stdout, rt.stderr))
 		},
 	}

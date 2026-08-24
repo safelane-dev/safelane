@@ -18,7 +18,7 @@ import (
 
 func frozen(t *testing.T) delta.ReleaseDelta {
 	t.Helper()
-	diff := delta.NewHandle("diff", []byte("+func Refund() {}"), "internal/refunds.go")
+	analysisBody := delta.NewHandle("analysis", []byte(`{"metrics":[]}`), "success-rate structure")
 	return delta.Freeze(delta.Input{
 		Application: "payments-api",
 		Environment: "production",
@@ -28,11 +28,10 @@ func frozen(t *testing.T) delta.ReleaseDelta {
 		Changes: delta.ChangeSet{
 			Base: strings.Repeat("d", 40), Head: strings.Repeat("a", 40), Status: "ahead",
 			Commits: []delta.Commit{{SHA: strings.Repeat("a", 40), Subject: "feat: add refunds"}},
-			Diffs:   []delta.Handle{diff},
 		},
 		Deployment: delta.DeploymentEvidence{Environment: "production", Impact: "critical"},
 		Health: []delta.HealthObjective{{
-			Name: "success-rate", Provider: "Prometheus", Resolved: true,
+			Name: "success-rate", Provider: "Prometheus", Resolved: true, Body: &analysisBody,
 		}},
 		CapturedAt: time.Date(2026, 8, 21, 12, 0, 0, 0, time.UTC),
 	})
@@ -283,6 +282,21 @@ func TestAnInvalidResultGetsOneCorrectionThenWaits(t *testing.T) {
 	// It says it could not assess, rather than claiming the change is risky.
 	if !strings.Contains(second.Recommendation.Concern, "not about the change") {
 		t.Errorf("concern = %q", second.Recommendation.Concern)
+	}
+}
+
+func TestAValidThirdSubmissionCannotReopenAnExhaustedSnapshot(t *testing.T) {
+	f := frozen(t)
+	valid := proceeding(t)
+	valid.SnapshotID = f.SnapshotID()
+	raw, err := json.Marshal(valid)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	outcome := assessment.Resolve(raw, f, releaseSettings(), assessment.MaxAttempts+1)
+	if outcome.Accepted || !outcome.Substituted || outcome.Recommendation.Action != assessment.ActionWait {
+		t.Fatalf("third attempt = %+v", outcome)
 	}
 }
 

@@ -119,21 +119,3 @@ func TestVerify_NotFound_IsUnknownWithReason(t *testing.T) {
 		t.Fatalf("want Unknown/PullRequestNotFound, got %+v", got)
 	}
 }
-
-func TestRawDiffRequestsTheExactComparisonAsGitHubDiff(t *testing.T) {
-	diff := []byte("diff --git a/a.go b/a.go\n+new\n")
-	mux := http.NewServeMux()
-	mux.HandleFunc("/repos/acme/payments/compare/base...head", func(w http.ResponseWriter, r *http.Request) {
-		if got := r.Header.Get("Accept"); got != "application/vnd.github.diff" {
-			t.Errorf("Accept = %q", got)
-		}
-		_, _ = w.Write(diff)
-	})
-	server := httptest.NewServer(mux)
-	t.Cleanup(server.Close)
-
-	got, err := (&Client{BaseURL: server.URL}).RawDiff(context.Background(), "acme/payments", "base", "head")
-	if err != nil || string(got) != string(diff) {
-		t.Fatalf("RawDiff = %q, %v", got, err)
-	}
-}

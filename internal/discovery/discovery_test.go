@@ -202,9 +202,9 @@ func TestAnalysisBodyPreservesUnknownFieldsAndRedactsCredentials(t *testing.T) {
 	c.responses["get analysistemplate success-rate -o json -n safelane-demo-api"] = `{
       "metadata":{"name":"success-rate"},
       "spec":{
-        "args":[{"name":"service","value":"candidate"}],
+		"args":[{"name":"service","value":"candidate"},{"name":"api-token","value":"named-argument-secret"}],
         "dryRun":[{"metricName":"shadow"}],
-        "metrics":[{"name":"success","successCondition":"result[0] >= 0.99","provider":{"web":{"url":"https://example.test","headers":{"Authorization":"Bearer never-store-this"}}}}]
+		"metrics":[{"name":"success","successCondition":"result[0] >= 0.99","provider":{"web":{"url":"https://person:password@example.test/check?token=query-secret&region=eu","headers":{"Authorization":"Bearer never-store-this"}}}}]
       }
     }`
 	target, err := serviceWith(c).Inspect(context.Background(), ".", "safelane-demo-api", "safelane-demo-api")
@@ -217,8 +217,15 @@ func TestAnalysisBodyPreservesUnknownFieldsAndRedactsCredentials(t *testing.T) {
 			t.Errorf("analysis body is missing %s:\n%s", expected, body)
 		}
 	}
-	if strings.Contains(body, "never-store-this") {
-		t.Fatalf("analysis body retained a credential:\n%s", body)
+	for _, secret := range []string{"never-store-this", "named-argument-secret", "password", "query-secret"} {
+		if strings.Contains(body, secret) {
+			t.Fatalf("analysis body retained %q:\n%s", secret, body)
+		}
+	}
+	for _, omitted := range []string{`"value": "[omitted]"`, `"url": "[omitted]"`, `"headers"`} {
+		if !strings.Contains(body, omitted) {
+			t.Fatalf("analysis body did not retain a safe structural marker %s:\n%s", omitted, body)
+		}
 	}
 }
 

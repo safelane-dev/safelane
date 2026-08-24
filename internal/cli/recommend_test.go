@@ -281,6 +281,24 @@ func TestASecondInvalidAssessmentBecomesAWaitingRecommendation(t *testing.T) {
 	}
 }
 
+func TestAThirdValidAssessmentCannotReplaceTheWaitingRecommendation(t *testing.T) {
+	opts := inspectOptions(t)
+	snapshot := snapshotFor(t, opts)
+	raw := a2Assessment(t, snapshot)
+
+	var stdout, stderr bytes.Buffer
+	code := Recommend(context.Background(), RecommendOptions{
+		Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(raw),
+		Attempt: assessment.MaxAttempts + 1,
+	}, &terminal{&stdout}, &stderr)
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s", code, stderr.String())
+	}
+	if !strings.HasPrefix(stdout.String(), "I recommend waiting on this release.") {
+		t.Fatalf("third submission reopened the snapshot:\n%s", stdout.String())
+	}
+}
+
 // The machine form carries the structured recommendation and the same text.
 func TestRecommendIsJSONWhenPiped(t *testing.T) {
 	opts := inspectOptions(t)

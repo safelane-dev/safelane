@@ -69,10 +69,6 @@ type Comparison struct {
 	// range came through. They are not evidence about the change itself;
 	// the commits are.
 	PullRequests []PullRequestSummary `json:"pull_requests,omitempty"`
-	// Diff is the immutable raw diff for base and head. It is used only to
-	// create a content-addressed evidence handle and is not serialized into
-	// the frozen release summary.
-	Diff []byte `json:"-"`
 }
 
 // FileChange is one path in a comparison.
@@ -345,7 +341,6 @@ func (c *Client) Compare(ctx context.Context, repository, base, head string) (Co
 	if err != nil {
 		return Comparison{}, err
 	}
-	comparison.Diff = diff
 	for _, file := range filesInDiff(diff) {
 		if !hasFile(comparison.Files, file) {
 			comparison.Files = append(comparison.Files, FileChange{
@@ -355,17 +350,6 @@ func (c *Client) Compare(ctx context.Context, repository, base, head string) (Co
 	}
 	comparison.PullRequests = pullRequestsIn(comparison.Commits)
 	return comparison, nil
-}
-
-// RawDiff retrieves the exact source range behind a frozen diff handle. The
-// caller verifies the returned bytes against that handle before exposing them.
-func (c *Client) RawDiff(ctx context.Context, repository, base, head string) ([]byte, error) {
-	owner, name, err := splitRepository(repository)
-	if err != nil {
-		return nil, err
-	}
-	path := fmt.Sprintf("/repos/%s/%s/compare/%s...%s", owner, name, url.PathEscape(base), url.PathEscape(head))
-	return c.read(ctx, path, "application/vnd.github.diff")
 }
 
 func hasFile(files []FileChange, path string) bool {

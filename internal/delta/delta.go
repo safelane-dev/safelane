@@ -44,8 +44,6 @@ type ChangeSet struct {
 	// PullRequests are provenance summaries. Which pull requests this came
 	// through, not what the change is.
 	PullRequests []PullRequest `json:"pull_requests,omitempty"`
-	// Diffs are handles, not contents. The raw hunks load on demand.
-	Diffs []Handle `json:"diffs,omitempty"`
 }
 
 // Commit is one commit in the range.
@@ -264,7 +262,6 @@ func copyChangeSet(c ChangeSet) ChangeSet {
 	out.Commits = append([]Commit(nil), c.Commits...)
 	out.Files = append([]File(nil), c.Files...)
 	out.PullRequests = append([]PullRequest(nil), c.PullRequests...)
-	out.Diffs = append([]Handle(nil), c.Diffs...)
 	return out
 }
 

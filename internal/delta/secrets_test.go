@@ -170,15 +170,13 @@ func TestHandlesNameBytesNotPaths(t *testing.T) {
 	}
 }
 
-// The heavy evidence is named in the Delta and fetched only when a specific
-// question needs it, so the normal path costs one read.
+// Typed detailed evidence is named in the Delta and fetched only when a
+// specific question needs it, so the normal path costs one read.
 func TestHeavyEvidenceLoadsOnlyOnDemand(t *testing.T) {
 	body := []byte("apiVersion: argoproj.io/v1alpha1\nkind: AnalysisTemplate\n")
 	analysisHandle := delta.NewHandle("analysis", body, "success-rate as written")
-	diffHandle := delta.NewHandle("diff", []byte("+func Refund() {}"), "internal/refunds.go")
 
 	in := input()
-	in.Changes.Diffs = []delta.Handle{diffHandle}
 	in.Health[0].Body = &analysisHandle
 
 	frozen := delta.Freeze(in)
@@ -190,10 +188,7 @@ func TestHeavyEvidenceLoadsOnlyOnDemand(t *testing.T) {
 	if !strings.Contains(frozen.HealthView(), analysisHandle.ID) {
 		t.Errorf("the health view does not name the handle:\n%s", frozen.HealthView())
 	}
-	if !strings.Contains(frozen.ChangesView(), diffHandle.ID) {
-		t.Errorf("the changes view does not name the diff handle:\n%s", frozen.ChangesView())
-	}
-	if got := frozen.Handles(); len(got) != 2 {
+	if got := frozen.Handles(); len(got) != 1 {
 		t.Errorf("handles = %+v", got)
 	}
 

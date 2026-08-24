@@ -181,15 +181,6 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 	}
 
 	changes := changeSetFrom(comparison, delta.SecretReferencesIn(target.RolloutJSON))
-	if len(changes.Diffs) > 0 {
-		if err := saveDiffLocator(environmentDir, diffLocator{
-			Handle: changes.Diffs[0], Repository: cfg.Application.Repository,
-			Base: comparison.Base, Head: comparison.Head, Excluded: excludedDiffFiles(changes.Files),
-		}); err != nil {
-			return delta.ReleaseDelta{}, github.Eligibility{}, release.Internal("save_diff_locator",
-				fmt.Sprintf("could not save the source diff locator: %v", err))
-		}
-	}
 	health := healthFrom(target)
 	for _, objective := range health {
 		if objective.Body != nil {
@@ -313,17 +304,6 @@ func changeSetFrom(comparison github.Comparison, secretReferences []string) delt
 			Number: pr.Number, Title: delta.Untrusted(pr.Title),
 			Branch: delta.Untrusted(pr.Summary), Merge: pr.Merge,
 		})
-	}
-	if len(comparison.Diff) > 0 {
-		excluded := diffExclusions(comparison.Diff, secretReferences, excludedDiffFiles(set.Files))
-		for index := range set.Files {
-			if reference := excluded[string(set.Files[index].Path)]; reference != "" {
-				set.Files[index].SecretReference = reference
-			}
-		}
-		sanitized := sanitizeDiff(comparison.Diff, excluded)
-		set.Diffs = append(set.Diffs, delta.NewHandle("diff", sanitized,
-			fmt.Sprintf("complete %s...%s source diff", comparison.Base, comparison.Head)))
 	}
 	return set
 }

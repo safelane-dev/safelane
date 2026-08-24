@@ -138,10 +138,6 @@ func TestCompareCarriesEveryCommitInTheRange(t *testing.T) {
 	if len(comparison.Files) != 1 || comparison.Files[0].Additions != 64 {
 		t.Errorf("files = %+v", comparison.Files)
 	}
-	if len(comparison.Diff) == 0 {
-		t.Fatal("comparison did not carry the immutable raw diff")
-	}
-
 	// Pull requests appear only as provenance summaries: which pull requests
 	// this range came through. The commits are the evidence.
 	if len(comparison.PullRequests) != 2 {

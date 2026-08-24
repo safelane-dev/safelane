@@ -44,6 +44,15 @@ type Outcome struct {
 // takes longer to find out, with the same code in front of real users. Waiting
 // is the honest answer, and it is the one a person can act on.
 func Resolve(raw []byte, frozen delta.ReleaseDelta, settings config.ReleaseSettings, attempt int) Outcome {
+	// Once the correction was spent, this snapshot stays waiting. A later
+	// syntactically valid submission must not reopen it; only newly frozen
+	// evidence (and therefore a new snapshot) starts a new assessment.
+	if attempt > MaxAttempts {
+		err := release.Invalid("assessment_attempts_exhausted", "assessment",
+			"this release snapshot already used its correction attempt",
+			"Inspect the release again after the evidence changes to start a new assessment.")
+		return Outcome{Recommendation: WaitingAfterFailure(frozen, err), Substituted: true}
+	}
 	recommendation, err := Parse(raw)
 	if err == nil {
 		err = Validate(recommendation, frozen, settings)
