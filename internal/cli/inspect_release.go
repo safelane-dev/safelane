@@ -190,6 +190,15 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 				fmt.Sprintf("could not save the source diff locator: %v", err))
 		}
 	}
+	health := healthFrom(target)
+	for _, objective := range health {
+		if objective.Body != nil {
+			if err := saveEvidenceContent(environmentDir, *objective.Body, objective.Content); err != nil {
+				return delta.ReleaseDelta{}, github.Eligibility{}, release.Internal("save_analysis_evidence",
+					fmt.Sprintf("could not save analysis evidence: %v", err))
+			}
+		}
+	}
 
 	lane, weights := defaultLane(cfg)
 	frozen := delta.Freeze(delta.Input{
@@ -208,7 +217,7 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 		},
 		Changes:    changes,
 		Deployment: deploymentFrom(cfg, environment, target, container, candidateArtifact, lane, weights),
-		Health:     healthFrom(target),
+		Health:     health,
 		History:    history,
 		CapturedAt: opts.now(),
 	})
@@ -306,7 +315,13 @@ func changeSetFrom(comparison github.Comparison, secretReferences []string) delt
 		})
 	}
 	if len(comparison.Diff) > 0 {
-		sanitized := sanitizeDiff(comparison.Diff, excludedDiffFiles(set.Files))
+		excluded := diffExclusions(comparison.Diff, secretReferences, excludedDiffFiles(set.Files))
+		for index := range set.Files {
+			if reference := excluded[string(set.Files[index].Path)]; reference != "" {
+				set.Files[index].SecretReference = reference
+			}
+		}
+		sanitized := sanitizeDiff(comparison.Diff, excluded)
 		set.Diffs = append(set.Diffs, delta.NewHandle("diff", sanitized,
 			fmt.Sprintf("complete %s...%s source diff", comparison.Base, comparison.Head)))
 	}
@@ -362,11 +377,9 @@ func exposureMechanism(target discovery.Target) string {
 		return fmt.Sprintf("request traffic routed by %s between Services %s and %s",
 			target.TrafficRouter, target.StableService, target.CanaryService)
 	}
-	if target.CanaryService == "" {
-		return "no canary Service; exposure cannot be described"
-	}
-	return fmt.Sprintf("canary Service %s; exposure is approximated by replica count, not measured request traffic",
-		target.CanaryService)
+	replicas := delta.ReplicasIn(target.RolloutJSON)
+	return fmt.Sprintf("no traffic router; candidate exposure is approximated by replica count across stable and candidate ReplicaSets (%d desired replicas), not measured request traffic",
+		replicas)
 }
 
 func containerIndex(target discovery.Target, name string) int {
@@ -382,8 +395,10 @@ func healthFrom(target discovery.Target) []delta.HealthObjective {
 	objectives := make([]delta.HealthObjective, 0, len(target.Analysis))
 	for _, analysis := range target.Analysis {
 		scope := ""
-		if target.CanaryService != "" {
-			scope = "the canary Service " + target.CanaryService
+		var body *delta.Handle
+		if len(analysis.Body) > 0 {
+			handle := delta.NewHandle("analysis", analysis.Body, "normalized AnalysisTemplate "+analysis.Name)
+			body = &handle
 		}
 		if len(analysis.Metrics) == 0 {
 			objectives = append(objectives, delta.HealthObjective{
@@ -391,6 +406,7 @@ func healthFrom(target discovery.Target) []delta.HealthObjective {
 				Condition: delta.Untrusted(analysis.Condition), Interval: analysis.Interval,
 				InitialDelay: analysis.InitialDelay, Scope: scope, Resolved: analysis.Resolved,
 				DefinitionDigest: analysis.DefinitionDigest,
+				Body:             body, Content: analysis.Body,
 			})
 			continue
 		}
@@ -404,6 +420,7 @@ func healthFrom(target discovery.Target) []delta.HealthObjective {
 				Condition: delta.Untrusted(metric.Condition), Interval: metric.Interval,
 				InitialDelay: metric.InitialDelay, Scope: scope, Resolved: analysis.Resolved,
 				DefinitionDigest: analysis.DefinitionDigest,
+				Body:             body, Content: analysis.Body,
 			})
 		}
 	}

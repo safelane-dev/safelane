@@ -118,7 +118,11 @@ type containerDoc struct {
 // registration say "checked by Prometheus" instead of "checked somehow".
 type analysisTemplateDoc struct {
 	Metadata objectMeta `json:"metadata"`
-	Spec     struct {
+	// RawSpec preserves application-owned fields SafeLane does not interpret.
+	// The compact health view is typed; the on-demand body must still be the
+	// complete definition rather than our current parser's subset.
+	RawSpec json.RawMessage `json:"-"`
+	Spec    struct {
 		Metrics []struct {
 			Name             string         `json:"name"`
 			Interval         string         `json:"interval"`
@@ -130,6 +134,23 @@ type analysisTemplateDoc struct {
 			Provider         map[string]any `json:"provider"`
 		} `json:"metrics"`
 	} `json:"spec"`
+}
+
+func (d *analysisTemplateDoc) UnmarshalJSON(data []byte) error {
+	type plain analysisTemplateDoc
+	var decoded plain
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		return err
+	}
+	var envelope struct {
+		Spec json.RawMessage `json:"spec"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return err
+	}
+	*d = analysisTemplateDoc(decoded)
+	d.RawSpec = append(json.RawMessage(nil), envelope.Spec...)
+	return nil
 }
 
 func getJSON[T any](ctx context.Context, run Runner, args []string) (T, error) {

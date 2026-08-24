@@ -300,8 +300,8 @@ func TestEvidenceRefusesBytesThatDoNotMatchTheFrozenHandle(t *testing.T) {
 func TestEvidenceNeverEmitsASecretReferencedDiff(t *testing.T) {
 	opts := inspectOptions(t)
 	source := defaultInspectSource()
-	diff := []byte("diff --git a/config/payments-api-secrets.yaml b/config/payments-api-secrets.yaml\n+token: " + liveSecret + "\n")
-	source.comparison.Files = []github.FileChange{{Path: "config/payments-api-secrets.yaml", Status: "modified"}}
+	diff := []byte("diff --git a/deploy/resources.yaml b/deploy/resources.yaml\n+metadata:\n+  name: payments-api-secrets\n+token: " + liveSecret + "\n")
+	source.comparison.Files = []github.FileChange{{Path: "deploy/resources.yaml", Status: "modified"}}
 	source.comparison.Diff = diff
 	opts.Source = source
 	frozen, _, err := FreezeDelta(context.Background(), opts)
@@ -318,6 +318,47 @@ func TestEvidenceNeverEmitsASecretReferencedDiff(t *testing.T) {
 		Origin: func(string) (string, error) { return "acme/payments-api", nil }, Source: diffFixture{content: diff},
 	}, &stdout, &stderr)
 	if code != ExitOK || strings.Contains(stdout.String(), liveSecret) || !strings.Contains(stdout.String(), "SafeLane omitted this file") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestEvidenceRedactsCredentialLikeSourceLines(t *testing.T) {
+	opts := inspectOptions(t)
+	source := defaultInspectSource()
+	diff := []byte("diff --git a/internal/client.go b/internal/client.go\n+const apiToken = \"" + liveSecret + "\"\n+func safe() {}\n")
+	source.comparison.Files = []github.FileChange{{Path: "internal/client.go", Status: "modified"}}
+	source.comparison.Diff = diff
+	opts.Source = source
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Evidence(context.Background(), EvidenceOptions{
+		Root: ".", Home: opts.Home, Environment: "production", HandleID: frozen.Changes().Diffs[0].ID,
+		Origin: func(string) (string, error) { return "acme/payments-api", nil }, Source: diffFixture{content: diff},
+	}, &stdout, &stderr)
+	if code != ExitOK || strings.Contains(stdout.String(), liveSecret) || !strings.Contains(stdout.String(), "[sensitive line omitted]") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
+	}
+}
+
+func TestAnalysisTemplateBodyLoadsOnDemandWithoutEnteringTheDelta(t *testing.T) {
+	opts := inspectOptions(t)
+	frozen, _, err := FreezeDelta(context.Background(), opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	health := frozen.Health()
+	if len(health) != 1 || health[0].Body == nil || len(health[0].Content) != 0 {
+		t.Fatalf("health evidence = %+v", health)
+	}
+	var stdout, stderr bytes.Buffer
+	code := Evidence(context.Background(), EvidenceOptions{
+		Root: ".", Home: opts.Home, Environment: "production", HandleID: health[0].Body.ID,
+		Origin: func(string) (string, error) { return "acme/payments-api", nil },
+	}, &stdout, &stderr)
+	if code != ExitOK || !strings.Contains(stdout.String(), "result[0] >= 0.99") {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, stdout.String(), stderr.String())
 	}
 }

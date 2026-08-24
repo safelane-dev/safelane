@@ -17,7 +17,8 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/release"
 )
 
-var diffHandleID = regexp.MustCompile(`^diff:sha256:([0-9a-f]{64})$`)
+var evidenceHandleID = regexp.MustCompile(`^(diff|analysis):sha256:([0-9a-f]{64})$`)
+var highEntropyLiteral = regexp.MustCompile(`[A-Za-z0-9+/=_-]{24,}`)
 
 // DiffSource reloads a source range by its immutable endpoints. Evidence
 // verifies the returned bytes against the frozen content-addressed handle.
@@ -31,6 +32,7 @@ type diffLocator struct {
 	Base       string            `json:"base"`
 	Head       string            `json:"head"`
 	Excluded   map[string]string `json:"excluded,omitempty"`
+	Content    []byte            `json:"content,omitempty"`
 }
 
 type EvidenceOptions struct {
@@ -62,6 +64,15 @@ func Evidence(ctx context.Context, opts EvidenceOptions, stdout, stderr io.Write
 	if err != nil {
 		return writeResultError(stderr, "evidence", err)
 	}
+	if len(locator.Content) > 0 {
+		if err := locator.Handle.Verify(locator.Content); err != nil {
+			return writeResultError(stderr, "evidence", err)
+		}
+		if _, err := stdout.Write(locator.Content); err != nil {
+			return writeResultError(stderr, "evidence", err)
+		}
+		return ExitOK
+	}
 	content, err := opts.Source.RawDiff(ctx, locator.Repository, locator.Base, locator.Head)
 	if err != nil {
 		return writeResultError(stderr, "evidence", sourceEvidenceUnavailable("source diff", err))
@@ -88,9 +99,6 @@ func excludedDiffFiles(files []delta.File) map[string]string {
 }
 
 func sanitizeDiff(content []byte, excluded map[string]string) []byte {
-	if len(excluded) == 0 {
-		return content
-	}
 	var output []byte
 	sections := bytes.SplitAfter(content, []byte("\n"))
 	skipping := false
@@ -111,19 +119,96 @@ func sanitizeDiff(content []byte, excluded map[string]string) []byte {
 			}
 		}
 		if !skipping {
-			output = append(output, line...)
+			if sensitiveDiffLine(text) {
+				prefix := text[:1]
+				output = append(output, []byte(prefix+"[sensitive line omitted]\n")...)
+			} else {
+				output = append(output, line...)
+			}
 		}
 	}
 	return output
 }
 
+func diffExclusions(content []byte, references []string, excluded map[string]string) map[string]string {
+	result := map[string]string{}
+	for path, reference := range excluded {
+		result[path] = reference
+	}
+	sections := bytes.Split(content, []byte("\ndiff --git "))
+	for index, section := range sections {
+		if index > 0 {
+			section = append([]byte("diff --git "), section...)
+		}
+		header := string(bytes.SplitN(section, []byte("\n"), 2)[0])
+		path := diffPath(header)
+		if path == "" {
+			continue
+		}
+		if sensitiveDiffPath(path) {
+			result[path] = "sensitive source content"
+			continue
+		}
+		lower := strings.ToLower(string(section))
+		for _, reference := range references {
+			name := reference
+			if _, after, found := strings.Cut(reference, "/"); found {
+				name = after
+			}
+			if name != "" && strings.Contains(lower, strings.ToLower(name)) {
+				result[path] = reference
+				break
+			}
+		}
+	}
+	return result
+}
+
+func sensitiveDiffPath(path string) bool {
+	lower := strings.ToLower(path)
+	for _, marker := range []string{".env", "secret", "credential", "private-key", "private_key", ".pem", ".p12"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return false
+}
+
+func sensitiveDiffLine(line string) bool {
+	if len(line) < 2 || (line[0] != '+' && line[0] != '-') || strings.HasPrefix(line, "+++") || strings.HasPrefix(line, "---") {
+		return false
+	}
+	lower := strings.ToLower(line)
+	for _, marker := range []string{"password", "passwd", "secret", "token", "api_key", "apikey", "private_key", "credential", "authorization", "sk_live", "ghp_"} {
+		if strings.Contains(lower, marker) {
+			return true
+		}
+	}
+	return highEntropyLiteral.MatchString(line)
+}
+
+func diffPath(header string) string {
+	marker := strings.LastIndex(header, " b/")
+	if marker < 0 {
+		marker = strings.LastIndex(header, ` "b/`)
+	}
+	if marker < 0 {
+		return ""
+	}
+	return strings.Trim(strings.TrimSpace(header[marker+3:]), `"`)
+}
+
 func diffLocatorPath(environmentDir, handleID string) (string, error) {
-	match := diffHandleID.FindStringSubmatch(handleID)
+	match := evidenceHandleID.FindStringSubmatch(handleID)
 	if match == nil {
 		return "", release.Invalid("invalid_evidence_handle", "handle",
-			fmt.Sprintf("%q is not a source diff handle", handleID), "Use a diff handle from the frozen Release Delta.")
+			fmt.Sprintf("%q is not a supported evidence handle", handleID), "Use a handle from the frozen Release Delta.")
 	}
-	return filepath.Join(environmentDir, "evidence", match[1]+".json"), nil
+	return filepath.Join(environmentDir, "evidence", match[2]+".json"), nil
+}
+
+func saveEvidenceContent(environmentDir string, handle delta.Handle, content []byte) error {
+	return saveDiffLocator(environmentDir, diffLocator{Handle: handle, Content: content})
 }
 
 func saveDiffLocator(environmentDir string, locator diffLocator) error {

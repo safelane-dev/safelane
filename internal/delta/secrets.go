@@ -180,7 +180,12 @@ func reduceSecretHunks(files []File, references []string) []File {
 	}
 	out := make([]File, 0, len(files))
 	for _, file := range files {
-		file.SecretReference = SecretReferenceForPath(string(file.Path), references)
+		// Content-aware capture may already have identified a reference even
+		// when the generic file name does not contain it. Preserve that stronger
+		// result; path matching is only the fallback.
+		if file.SecretReference == "" {
+			file.SecretReference = SecretReferenceForPath(string(file.Path), references)
+		}
 		out = append(out, file)
 	}
 	return out

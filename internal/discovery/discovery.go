@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -148,6 +149,9 @@ type AnalysisReference struct {
 	// template definition, including provider queries not shown in the compact
 	// health view.
 	DefinitionDigest string `json:"definition_digest,omitempty"`
+	// Body is a normalized, secret-safe copy used only to create on-demand
+	// evidence. It is never printed by discovery or stored in the Release Delta.
+	Body []byte `json:"-"`
 }
 
 type AnalysisMetric struct {
@@ -319,6 +323,7 @@ func (s Service) resolveAnalysis(ctx context.Context, namespace string, doc roll
 			found.Resolved = true
 			found.Provider = providerOf(template)
 			found.DefinitionDigest = analysisDefinitionDigest(template)
+			found.Body = safeAnalysisBody(template)
 			describeMetrics(&found, template)
 		}
 		refs = append(refs, found)
@@ -326,11 +331,56 @@ func (s Service) resolveAnalysis(ctx context.Context, namespace string, doc roll
 	return refs, reasons
 }
 
+func safeAnalysisBody(template analysisTemplateDoc) []byte {
+	var value any
+	raw := template.RawSpec
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(template.Spec)
+	}
+	if json.Unmarshal(raw, &value) != nil {
+		return nil
+	}
+	redactAnalysisSecrets(value)
+	var safe bytes.Buffer
+	encoder := json.NewEncoder(&safe)
+	encoder.SetEscapeHTML(false)
+	encoder.SetIndent("", "  ")
+	if encoder.Encode(value) != nil {
+		return nil
+	}
+	return safe.Bytes()
+}
+
+func redactAnalysisSecrets(value any) {
+	switch current := value.(type) {
+	case map[string]any:
+		for key, child := range current {
+			lower := strings.ToLower(key)
+			if strings.Contains(lower, "secret") || strings.Contains(lower, "token") ||
+				strings.Contains(lower, "password") || strings.Contains(lower, "credential") ||
+				strings.Contains(lower, "header") || strings.Contains(lower, "apikey") || strings.Contains(lower, "api_key") {
+				current[key] = "[omitted]"
+				continue
+			}
+			redactAnalysisSecrets(child)
+		}
+	case []any:
+		for _, child := range current {
+			redactAnalysisSecrets(child)
+		}
+	}
+}
+
 func analysisDefinitionDigest(template analysisTemplateDoc) string {
-	raw, err := json.Marshal(template.Spec)
-	if err != nil {
+	var value any
+	raw := template.RawSpec
+	if len(raw) == 0 {
+		raw, _ = json.Marshal(template.Spec)
+	}
+	if json.Unmarshal(raw, &value) != nil {
 		return ""
 	}
+	raw, _ = json.Marshal(value)
 	sum := sha256.Sum256(raw)
 	return "sha256:" + hex.EncodeToString(sum[:])
 }

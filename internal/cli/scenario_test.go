@@ -137,7 +137,15 @@ func world(t *testing.T, name string) InspectOptions {
 
 	case "routed-shape":
 		cluster := inspectCluster()
-		rollout := strings.Replace(deployedRollout(), `"canary": {`, `"canary": {"trafficRouting":{"nginx":{"stableIngress":"payments-api"}},`, 1)
+		// Exercise the public Argo Rollouts Istio example's real object shape,
+		// adapted only to this fixture's application names and immutable image.
+		raw, err := os.ReadFile(filepath.Join("..", "discovery", "testdata", "argo-istio-rollout.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		rollout := strings.ReplaceAll(string(raw), "istio-success-rate", "success-rate")
+		rollout = strings.ReplaceAll(rollout, "istio-rollout", "payments-api")
+		rollout = strings.ReplaceAll(rollout, "argoproj/rollouts-demo:blue", "ghcr.io/acme/payments-api@"+runningDigest)
 		cluster["get rollouts.argoproj.io payments-api -n payments -o json"] = rollout
 		opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
 		return opts
@@ -236,7 +244,18 @@ func TestActiveAgentAssessmentScenarios(t *testing.T) {
 					Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(turn.Assessment),
 				}, &stdout, &stderr)
 				if code != ExitOK {
-					t.Fatalf("agent assessment was rejected: %s\n%s", stderr.String(), turn.Assessment)
+					firstError := stderr.String()
+					turn.Assessment = correctAssessmentAgent(t, provider, turn.Assessment, firstError)
+					t.Logf("corrected assessment after validation: %s", turn.Assessment)
+					stdout.Reset()
+					stderr.Reset()
+					code = Recommend(context.Background(), RecommendOptions{
+						Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(turn.Assessment),
+					}, &stdout, &stderr)
+					if code != ExitOK {
+						t.Fatalf("agent assessment remained invalid after one correction:\nfirst: %s\nsecond: %s\n%s",
+							firstError, stderr.String(), turn.Assessment)
+					}
 				}
 				var result struct {
 					Recommendation assessment.Recommendation `json:"recommendation"`
@@ -262,51 +281,50 @@ type agentAssessmentTurn struct {
 	GeneralReview bool            `json:"general_code_review"`
 	Questions     []agentQuestion `json:"questions"`
 	Assessment    json.RawMessage `json:"assessment"`
+	ToolTrace     []string        `json:"-"`
 }
 
 func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.ReleaseDelta) agentAssessmentTurn {
 	t.Helper()
-	views, err := json.MarshalIndent(frozen.Views(), "", "  ")
-	if err != nil {
-		t.Fatal(err)
+	evidenceDir := t.TempDir()
+	views := frozen.Views()
+	for _, name := range delta.ViewNames {
+		if err := os.WriteFile(filepath.Join(evidenceDir, name+".txt"), []byte(views[name]), 0o600); err != nil {
+			t.Fatal(err)
+		}
 	}
 	handles, err := json.MarshalIndent(frozen.Handles(), "", "  ")
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(evidenceDir, "handles.json"), handles, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	prompt := fmt.Sprintf(`You are evaluating SafeLane's active assessment skill. Follow the Assess section below exactly.
 
-For this offline evaluation, use only the supplied typed evidence. Record the view names in the order you read them, followed by any listed evidence handles you investigated. Do not perform a general code review. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
+For this offline evaluation, use only the evidence files in your current directory. You must use your available read tool to open changes.txt, deployment.txt, health.txt, and history.txt, in that order, before assessing the release. You may open handles.json afterward only when a material question requires deeper evidence. Do not list the directory, inspect the repository, or perform a general code review. Record the view names in the order you read them, followed by any listed evidence handles you investigated. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
 
 Return JSON only with this outer shape:
 {"views_read":["changes","deployment","health","history"],"investigated":[],"general_code_review":false,"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
 
-Inside assessment, copy the skill's exact field names and nesting. In particular, observations use statement; hazards use name, evidence, preconditions, consequence, and a nested coverage object. Do not use observation, hazard, recommendation, decision, user_facts, or other synonyms.
+Inside assessment, copy the skill's exact field names and nesting. In particular, observations use statement; hazards use name, evidence, preconditions, consequence, and a nested coverage object. risk and action are always top-level. For wait, concern, unconfirmed, analysis_blindspot, and next_step are also top-level; NEVER create a wait object. Do not use observation, hazard, recommendation, decision, user_facts, or other synonyms.
 
 The assessment snapshot must be %q. Evidence citations must be a view name or listed handle. Do not use facts from this evaluation instruction as release evidence.
 
 SKILL:
 %s
+`, frozen.SnapshotID(), skill)
 
-FROZEN VIEWS:
-%s
-
-AVAILABLE HANDLES:
-%s
-`, frozen.SnapshotID(), skill, views, handles)
-
-	output := filepath.Join(t.TempDir(), "assessment.json")
+	output := filepath.Join(evidenceDir, "assessment.json")
 	var command *exec.Cmd
 	if provider == "claude" {
-		command = exec.Command("claude", "-p", "--bare", "--tools", "", "--no-session-persistence")
+		command = exec.Command("claude", "-p", "--bare", "--tools", "Read", "--no-session-persistence",
+			"--output-format", "stream-json", "--verbose")
+		command.Dir = evidenceDir
 		command.Stdin = strings.NewReader(prompt)
 	} else {
-		root, err := filepath.Abs(filepath.Join("..", ".."))
-		if err != nil {
-			t.Fatal(err)
-		}
-		command = exec.Command("codex", "exec", "-C", root, "-s", "read-only", "--ephemeral",
-			"--ignore-user-config", "--ignore-rules", "-o", output, "-")
+		command = exec.Command("codex", "exec", "-C", evidenceDir, "--skip-git-repo-check", "-s", "read-only", "--ephemeral",
+			"--ignore-user-config", "--ignore-rules", "--json", "-o", output, "-")
 		command.Stdin = strings.NewReader(prompt)
 	}
 	transcript, err := command.CombinedOutput()
@@ -319,6 +337,8 @@ AVAILABLE HANDLES:
 		if err != nil {
 			t.Fatal(err)
 		}
+	} else {
+		raw = claudeResult(t, transcript)
 	}
 	raw = bytes.TrimSpace(raw)
 	raw = bytes.TrimPrefix(raw, []byte("```json"))
@@ -331,7 +351,109 @@ AVAILABLE HANDLES:
 	if len(turn.Assessment) == 0 || string(turn.Assessment) == "null" {
 		t.Fatalf("agent returned no final assessment: %s", raw)
 	}
+	turn.ToolTrace = observedToolTrace(transcript)
 	return turn
+}
+
+func correctAssessmentAgent(t *testing.T, provider string, invalid json.RawMessage, validation string) json.RawMessage {
+	t.Helper()
+	prompt := fmt.Sprintf(`SafeLane rejected the assessment below. Correct only the cited contract errors while preserving its grounded reasoning. Return the corrected assessment JSON object only, with no wrapper or Markdown.
+
+Required rules: risk and action are top-level. For action "wait", concern, unconfirmed, analysis_blindspot, and next_step are separate top-level fields; there is no wait object. For action "proceed", lane is top-level. Use exactly analysis_blindspot, not analysis_blind_spot.
+
+VALIDATION:
+%s
+
+INVALID ASSESSMENT:
+%s
+`, validation, invalid)
+	dir := t.TempDir()
+	output := filepath.Join(dir, "corrected.json")
+	var command *exec.Cmd
+	if provider == "claude" {
+		command = exec.Command("claude", "-p", "--bare", "--tools", "", "--no-session-persistence")
+		command.Dir = dir
+	} else {
+		command = exec.Command("codex", "exec", "-C", dir, "--skip-git-repo-check", "-s", "read-only", "--ephemeral",
+			"--ignore-user-config", "--ignore-rules", "-o", output, "-")
+	}
+	command.Stdin = strings.NewReader(prompt)
+	transcript, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("assessment correction failed: %v\n%s", err, transcript)
+	}
+	raw := transcript
+	if provider == "codex" {
+		raw, err = os.ReadFile(output)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	raw = bytes.TrimSpace(raw)
+	raw = bytes.TrimPrefix(raw, []byte("```json"))
+	raw = bytes.TrimPrefix(raw, []byte("```"))
+	raw = bytes.TrimSuffix(raw, []byte("```"))
+	if !json.Valid(bytes.TrimSpace(raw)) {
+		t.Fatalf("agent correction was not JSON:\n%s", raw)
+	}
+	return append(json.RawMessage(nil), bytes.TrimSpace(raw)...)
+}
+
+func claudeResult(t *testing.T, transcript []byte) []byte {
+	t.Helper()
+	var result []byte
+	for _, line := range bytes.Split(transcript, []byte("\n")) {
+		var event struct {
+			Type   string `json:"type"`
+			Result string `json:"result"`
+		}
+		if json.Unmarshal(line, &event) == nil && event.Type == "result" {
+			result = []byte(event.Result)
+		}
+	}
+	if len(result) == 0 {
+		t.Fatalf("Claude returned no result event:\n%s", transcript)
+	}
+	return result
+}
+
+// observedToolTrace keeps only actual command/Read tool events. Prompt text
+// and the model's own report cannot satisfy this check.
+func observedToolTrace(transcript []byte) []string {
+	var trace []string
+	for _, line := range bytes.Split(transcript, []byte("\n")) {
+		var value any
+		if json.Unmarshal(line, &value) != nil {
+			continue
+		}
+		collectToolTrace(value, &trace)
+	}
+	return trace
+}
+
+func collectToolTrace(value any, trace *[]string) {
+	switch current := value.(type) {
+	case map[string]any:
+		if current["type"] == "command_execution" {
+			if command, ok := current["command"].(string); ok {
+				*trace = append(*trace, command)
+			}
+		}
+		if current["type"] == "tool_use" && current["name"] == "Read" {
+			if input, ok := current["input"].(map[string]any); ok {
+				if path, ok := input["file_path"].(string); ok {
+					*trace = append(*trace, path)
+				}
+			}
+		}
+		for _, child := range current {
+			collectToolTrace(child, trace)
+		}
+	case []any:
+		for _, child := range current {
+			collectToolTrace(child, trace)
+		}
+	}
 }
 
 func checkAgentTrace(t *testing.T, frozen delta.ReleaseDelta, turn agentAssessmentTurn) {
@@ -341,6 +463,21 @@ func checkAgentTrace(t *testing.T, frozen delta.ReleaseDelta, turn agentAssessme
 	}
 	if turn.GeneralReview {
 		t.Error("agent performed a general code review")
+	}
+	observed := strings.Join(turn.ToolTrace, "\n")
+	position := -1
+	for _, view := range delta.ViewNames {
+		next := strings.Index(observed[position+1:], view+".txt")
+		if next < 0 {
+			t.Errorf("tool trace did not show %s being read: %v", view, turn.ToolTrace)
+			continue
+		}
+		position += next + 1
+	}
+	for _, broad := range []string{"git status", "rg --files", "Get-ChildItem", "ls -"} {
+		if strings.Contains(observed, broad) {
+			t.Errorf("agent performed a broad investigation (%s): %v", broad, turn.ToolTrace)
+		}
 	}
 	known := map[string]bool{}
 	for _, handle := range frozen.Handles() {

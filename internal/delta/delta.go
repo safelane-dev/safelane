@@ -139,6 +139,9 @@ type HealthObjective struct {
 	DefinitionDigest string `json:"definition_digest,omitempty"`
 	// Body is a handle to the template as written. It loads on demand.
 	Body *Handle `json:"body,omitempty"`
+	// Content is the secret-safe body behind Body while the capture boundary
+	// persists its locator. It is never serialized into the Delta.
+	Content []byte `json:"-"`
 }
 
 // HistoryCard is one compact entry from this Application and Environment's
@@ -220,7 +223,7 @@ func Freeze(in Input) ReleaseDelta {
 		candidate:   in.Candidate,
 		changes:     copyChangeSet(in.Changes),
 		deployment:  excludeSecrets(in.Deployment),
-		health:      append([]HealthObjective(nil), in.Health...),
+		health:      captureHealth(in.Health),
 		history:     boundHistory(in.History),
 		provided:    append([]ProvidedEvidence(nil), in.Provided...),
 		capturedAt:  in.CapturedAt,
@@ -228,6 +231,18 @@ func Freeze(in Input) ReleaseDelta {
 	d.changes.Files = reduceSecretHunks(d.changes.Files, d.deployment.SecretReferences)
 	d.snapshotID = contentHash(d)
 	return d
+}
+
+func captureHealth(objectives []HealthObjective) []HealthObjective {
+	result := append([]HealthObjective(nil), objectives...)
+	for index := range result {
+		result[index].Content = nil
+		if objectives[index].Body != nil {
+			handle := *objectives[index].Body
+			result[index].Body = &handle
+		}
+	}
+	return result
 }
 
 // boundHistory keeps the newest cards, newest first.
@@ -284,7 +299,7 @@ func (d ReleaseDelta) Deployment() DeploymentEvidence {
 
 // Health returns a copy of the analyses SafeLane will watch.
 func (d ReleaseDelta) Health() []HealthObjective {
-	return append([]HealthObjective(nil), d.health...)
+	return captureHealth(d.health)
 }
 
 // History returns a copy of the bounded history.

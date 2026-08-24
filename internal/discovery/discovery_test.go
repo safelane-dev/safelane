@@ -197,6 +197,31 @@ func TestInspectPreservesEveryAnalysisMetric(t *testing.T) {
 	}
 }
 
+func TestAnalysisBodyPreservesUnknownFieldsAndRedactsCredentials(t *testing.T) {
+	c := demoCluster(t)
+	c.responses["get analysistemplate success-rate -o json -n safelane-demo-api"] = `{
+      "metadata":{"name":"success-rate"},
+      "spec":{
+        "args":[{"name":"service","value":"candidate"}],
+        "dryRun":[{"metricName":"shadow"}],
+        "metrics":[{"name":"success","successCondition":"result[0] >= 0.99","provider":{"web":{"url":"https://example.test","headers":{"Authorization":"Bearer never-store-this"}}}}]
+      }
+    }`
+	target, err := serviceWith(c).Inspect(context.Background(), ".", "safelane-demo-api", "safelane-demo-api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(target.Analysis[0].Body)
+	for _, expected := range []string{`"args"`, `"dryRun"`, `"successCondition"`, `"[omitted]"`} {
+		if !strings.Contains(body, expected) {
+			t.Errorf("analysis body is missing %s:\n%s", expected, body)
+		}
+	}
+	if strings.Contains(body, "never-store-this") {
+		t.Fatalf("analysis body retained a credential:\n%s", body)
+	}
+}
+
 func TestUnsupportedShapesAreNamedAndExplained(t *testing.T) {
 	for name, tc := range map[string]struct {
 		rollout string
