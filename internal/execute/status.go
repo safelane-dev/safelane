@@ -292,7 +292,7 @@ func (e *Executor) WaitForGate(ctx context.Context, timeout time.Duration, onTra
 
 // WaitForBackgroundAnalysis keeps an advance at its newly reached gate until
 // Argo's background AnalysisRun settles. Start intentionally does not use this:
-// the operator must be able to inspect and refuse the first proposed widening
+// the user must be able to inspect and refuse the first proposed widening
 // while analysis is still running.
 func (e *Executor) WaitForBackgroundAnalysis(ctx context.Context, timeout time.Duration) (Status, error) {
 	deadline := e.now().Add(timeout)

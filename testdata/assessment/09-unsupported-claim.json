@@ -1,0 +1,12 @@
+{
+  "name": "an attractive unsupported claim is rejected",
+  "why": "Confident prose cannot substitute for a real evidence handle.",
+  "world": "unsupported-claim",
+  "expect": {"eligible": true, "assessment_rejected": true, "reject_mentions": "load-test-report", "approvable": false},
+  "assessment": {
+    "snapshot": "",
+    "observations": [{"statement": "A production-scale load test proved this release has no latency regression.", "evidence": ["load-test-report"]}],
+    "risk": "low", "action": "proceed", "lane": "fast",
+    "rationale": "The claimed load test makes this safe."
+  }
+}

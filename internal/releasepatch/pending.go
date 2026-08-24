@@ -26,6 +26,11 @@ type Pending struct {
 	Action string `json:"action"`
 	Lane   string `json:"lane,omitempty"`
 	Patch  Patch  `json:"patch"`
+	// Delta and Recommendation are the frozen proof inputs. They are stored
+	// once here and copied into the durable Release Attempt when approval is
+	// spent; the conversation and abandoned drafts are never retained.
+	Delta          json.RawMessage `json:"delta,omitempty"`
+	Recommendation json.RawMessage `json:"recommendation,omitempty"`
 	// Facts are what was true when the recommendation was frozen. The recheck
 	// compares against these.
 	Facts    Facts     `json:"facts"`

@@ -11,7 +11,7 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/delta"
-	"github.com/AndrewMaged814/safelane/internal/releasepatch"
+	"github.com/AndrewMaged814/safelane/internal/discovery"
 	"github.com/AndrewMaged814/safelane/internal/verify/github"
 )
 
@@ -43,6 +43,8 @@ type scenario struct {
 		TextPreservedExactly bool   `json:"text_preserved_exactly"`
 		NamesANextStep       bool   `json:"names_a_next_step"`
 		Approvable           bool   `json:"approvable"`
+		AssessmentRejected   bool   `json:"assessment_rejected"`
+		RejectMentions       string `json:"reject_mentions"`
 	} `json:"expect"`
 	Assessment json.RawMessage `json:"assessment"`
 }
@@ -72,6 +74,16 @@ func world(t *testing.T, name string) InspectOptions {
 			{Path: "docs/" + injection + ".md", Status: "added", Additions: 3, Deletions: 0},
 		}
 		opts.Source = source
+		cluster := inspectCluster()
+		rollout := strings.ReplaceAll(deployedRollout(), "success-rate", injection)
+		cluster["get rollouts.argoproj.io payments-api -n payments -o json"] = rollout
+		template := cluster["get analysistemplate success-rate -o json -n payments"]
+		delete(cluster, "get analysistemplate success-rate -o json -n payments")
+		cluster["get analysistemplate "+injection+" -o json -n payments"] = strings.ReplaceAll(template, "success-rate", injection)
+		opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
+		opts.History = func(string, string) ([]delta.HistoryCard, error) {
+			return []delta.HistoryCard{{Revision: "old", Outcome: "completed", Note: delta.Untrusted(injection)}}, nil
+		}
 		return opts
 
 	case "migration":
@@ -82,6 +94,46 @@ func world(t *testing.T, name string) InspectOptions {
 			{Path: "internal/refunds/store.go", Status: "modified", Additions: 84, Deletions: 31},
 		}
 		opts.Source = source
+		return opts
+
+	case "dependency-history":
+		source := defaultInspectSource()
+		source.comparison.Commits[1].Subject = "fix: retry ledger requests after timeouts"
+		source.comparison.Files = []github.FileChange{{Path: "internal/ledger/client.go", Status: "modified", Additions: 46, Deletions: 18}}
+		opts.Source = source
+		opts.History = func(string, string) ([]delta.HistoryCard, error) {
+			return []delta.HistoryCard{{Revision: "previous", Outcome: "failed", Note: delta.Untrusted("latency rose during the ledger retry release")}}, nil
+		}
+		return opts
+
+	case "documentation":
+		source := defaultInspectSource()
+		source.comparison.Commits = []github.Revision{{SHA: candidateRevision, Subject: "docs: clarify refund operations"}}
+		source.comparison.Files = []github.FileChange{{Path: "docs/refunds.md", Status: "modified", Additions: 24, Deletions: 7}}
+		opts.Source = source
+		return opts
+
+	case "irrelevant-history":
+		opts.History = func(string, string) ([]delta.HistoryCard, error) {
+			return []delta.HistoryCard{{Revision: "old", Outcome: "failed", Note: delta.Untrusted("a frontend CSS release increased page load time")}}, nil
+		}
+		return opts
+
+	case "large-diff":
+		source := defaultInspectSource()
+		source.comparison.Files = []github.FileChange{{Path: "internal/generated/routes.go", Status: "modified", Additions: 4200, Deletions: 4100}}
+		opts.Source = source
+		return opts
+
+	case "replica-shape":
+		cluster := inspectCluster()
+		rollout := strings.ReplaceAll(deployedRollout(), "          \"stableService\": \"payments-api-stable\",\n", "")
+		rollout = strings.ReplaceAll(rollout, "          \"canaryService\": \"payments-api-canary\",\n", "")
+		cluster["get rollouts.argoproj.io payments-api -n payments -o json"] = rollout
+		opts.Cluster = discovery.Service{Run: cluster.run, Origin: func(string) (string, error) { return "acme/payments-api", nil }}
+		return opts
+
+	case "routed-shape", "unsupported-claim":
 		return opts
 	}
 
@@ -95,8 +147,8 @@ func TestFixedAssessmentScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) < 4 {
-		t.Fatalf("the plan requires four scenarios as a minimum; found %d", len(entries))
+	if len(entries) < 10 {
+		t.Fatalf("the plan requires ten scenarios; found %d", len(entries))
 	}
 
 	for _, entry := range entries {
@@ -117,6 +169,14 @@ func TestFixedAssessmentScenarios(t *testing.T) {
 
 func runScenario(t *testing.T, s scenario) {
 	t.Helper()
+	if s.World == "deployment-shapes" {
+		for _, shape := range []string{"replica-shape", "routed-shape"} {
+			copy := s
+			copy.World = shape
+			t.Run(shape, func(t *testing.T) { runScenario(t, copy) })
+		}
+		return
+	}
 	opts := world(t, s.World)
 
 	frozen, eligibility, err := FreezeDelta(context.Background(), opts)
@@ -152,6 +212,15 @@ func runScenario(t *testing.T, s scenario) {
 	code := Recommend(context.Background(), RecommendOptions{
 		Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(body),
 	}, &stdout, &stderr)
+	if s.Expect.AssessmentRejected {
+		if code == ExitOK {
+			t.Fatal("an unsupported assessment claim was accepted")
+		}
+		if !strings.Contains(stderr.String(), s.Expect.RejectMentions) {
+			t.Fatalf("rejection did not mention %q: %s", s.Expect.RejectMentions, stderr.String())
+		}
+		return
+	}
 	if code != ExitOK {
 		t.Fatalf("recommend exit %d: %s", code, stderr.String())
 	}
@@ -243,10 +312,13 @@ func checkDirection(t *testing.T, s scenario, r assessment.Recommendation, text 
 // cannot be run, and a proceeding one can.
 func checkApprovability(t *testing.T, s scenario, opts InspectOptions) {
 	t.Helper()
+	if s.Expect.Approvable {
+		approvePending(t, opts, "approve this")
+	}
 	var stdout, stderr bytes.Buffer
 	code := Run(context.Background(), RunOptions{
-		Inspect: opts,
-		Apply:   func(context.Context, releasepatch.Patch) error { return nil },
+		Inspect:    opts,
+		Coordinate: completingCoordinator(nil),
 	}, &stdout, &stderr)
 
 	if s.Expect.Approvable && code != ExitOK {

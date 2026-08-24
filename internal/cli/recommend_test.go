@@ -9,7 +9,24 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/verify/github"
 )
+
+type candidateCalls struct {
+	inspectSource
+	revisions    int
+	defaultHeads int
+}
+
+func (s *candidateCalls) DefaultHead(ctx context.Context, repository string) (github.Revision, error) {
+	s.defaultHeads++
+	return s.inspectSource.DefaultHead(ctx, repository)
+}
+
+func (s *candidateCalls) Revision(ctx context.Context, repository, revision string) (github.Revision, error) {
+	s.revisions++
+	return s.inspectSource.Revision(ctx, repository, revision)
+}
 
 func snapshotFor(t *testing.T, opts InspectOptions) string {
 	t.Helper()
@@ -18,6 +35,37 @@ func snapshotFor(t *testing.T, opts InspectOptions) string {
 		t.Fatal(err)
 	}
 	return frozen.SnapshotID()
+}
+
+func TestRecommendKeepsTheExactRevisionSelectedByInspect(t *testing.T) {
+	opts := inspectOptions(t)
+	source := &candidateCalls{inspectSource: defaultInspectSource()}
+	opts.Source = source
+	opts.Revision = candidateRevision
+
+	var inspected, inspectErr bytes.Buffer
+	if code := Inspect(context.Background(), opts, &inspected, &inspectErr); code != ExitOK {
+		t.Fatalf("inspect: %s", inspectErr.String())
+	}
+	var result struct {
+		Snapshot string `json:"snapshot_id"`
+	}
+	if err := json.Unmarshal(inspected.Bytes(), &result); err != nil {
+		t.Fatal(err)
+	}
+
+	// The next command has no revision argument by design; it must recover
+	// the exact inspected candidate from the pending inspection.
+	opts.Revision = ""
+	var stdout, stderr bytes.Buffer
+	if code := Recommend(context.Background(), RecommendOptions{
+		Inspect: opts, AssessmentPath: "-", Stdin: bytes.NewReader(a2Assessment(t, result.Snapshot)),
+	}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("recommend: %s", stderr.String())
+	}
+	if source.revisions != 2 || source.defaultHeads != 0 {
+		t.Fatalf("revision reads=%d default-head reads=%d", source.revisions, source.defaultHeads)
+	}
 }
 
 // a2Assessment is Appendix A2's example: three observations, low risk, and the

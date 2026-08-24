@@ -60,6 +60,12 @@ func Inspect(ctx context.Context, opts InspectOptions, stdout, stderr io.Writer)
 		renderIneligible(stderr, eligibility)
 		return ExitFail
 	}
+	environmentDir := config.ForApp(opts.Home, frozen.Application()).ForEnvironment(frozen.Environment()).Dir
+	if err := saveInspection(environmentDir, pendingInspection{
+		Snapshot: frozen.SnapshotID(), Revision: frozen.Candidate().Revision,
+	}); err != nil {
+		return writeResultError(stderr, "inspect", err)
+	}
 
 	if RenderingFor(stdout, opts.ForceJSON) == RenderJSON {
 		encoder := json.NewEncoder(stdout)

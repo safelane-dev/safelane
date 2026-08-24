@@ -15,8 +15,8 @@ set -euo pipefail
 # Rollout is bound to a digest, never a mutable tag.
 if [ -z "${BASELINE_DIGEST:-}" ]; then
   BASELINE_DIGEST="$(resolve_digest "${BASELINE_IMAGE_REPO#ghcr.io/}" "${BASELINE_TAG}")"
-  BASELINE_IMAGE="${BASELINE_IMAGE_REPO}@${BASELINE_DIGEST}"
 fi
+BASELINE_IMAGE="${BASELINE_IMAGE_REPO}@${BASELINE_DIGEST}"
 echo "app ${SAFELANE_APP} -> ${BASELINE_IMAGE}"
 
 kubectl create namespace "${NAMESPACE}" --dry-run=client -o yaml | kubectl apply -f -

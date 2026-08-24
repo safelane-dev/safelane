@@ -1,0 +1,12 @@
+{
+  "name": "the same change can be assessed across replica and routed canaries",
+  "why": "SafeLane assesses the release against application-owned rollout controls without requiring Ahmed's exact demo topology.",
+  "world": "deployment-shapes",
+  "expect": {"eligible": true, "action": "proceed", "lane": "fast", "approvable": true},
+  "assessment": {
+    "snapshot": "",
+    "observations": [{"statement": "The candidate is bound to the successful build and the application supplies continuous health analysis.", "evidence": ["changes", "deployment", "health"]}],
+    "risk": "low", "action": "proceed", "lane": "fast",
+    "rationale": "The release can use the configured fast lane in either supported canary shape."
+  }
+}

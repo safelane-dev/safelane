@@ -1,0 +1,20 @@
+{
+  "name": "a retry change accounts for the relevant prior latency failure",
+  "why": "History matters only when it is relevant to this deployment. A previous retry-related latency failure justifies a slower configured lane without turning history into an automatic veto.",
+  "world": "dependency-history",
+  "expect": {"eligible": true, "action": "proceed", "lane": "standard", "approvable": true},
+  "assessment": {
+    "snapshot": "",
+    "observations": [{"statement": "This release changes ledger retries, and a previous related release raised latency.", "evidence": ["changes", "history"]}],
+    "history_findings": [{"statement": "A previous ledger retry release failed after latency increased.", "evidence": ["history"]}],
+    "hazards": [{
+      "name": "retry amplification",
+      "evidence": ["changes", "history"],
+      "preconditions": ["the ledger is slow", "the new retries overlap"],
+      "consequence": "Request latency and load can rise together.",
+      "coverage": {"status": "partially_covered", "evidence": ["health"], "explanation": "Request failures are measured, but latency is not."}
+    }],
+    "risk": "medium", "action": "proceed", "lane": "standard",
+    "rationale": "The related failure supports a slower rollout while the configured health check watches request success."
+  }
+}

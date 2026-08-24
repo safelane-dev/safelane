@@ -1,0 +1,12 @@
+{
+  "name": "irrelevant history does not steer the recommendation",
+  "why": "A frontend page-load failure is not evidence about this backend refund change and must not become a generic caution penalty.",
+  "world": "irrelevant-history",
+  "expect": {"eligible": true, "action": "proceed", "lane": "fast", "approvable": true},
+  "assessment": {
+    "snapshot": "",
+    "observations": [{"statement": "The previous frontend failure has no shared component or failure mode with this backend change.", "evidence": ["changes", "history"]}],
+    "risk": "low", "action": "proceed", "lane": "fast",
+    "rationale": "The available history is unrelated to this release."
+  }
+}

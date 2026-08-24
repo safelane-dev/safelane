@@ -1,6 +1,7 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -47,6 +48,16 @@ type Registration struct {
 // fingerprint no longer matches. Registering what a person saw and registering
 // whatever is there now are different things, and only the first one is honest.
 func (s Service) Register(ctx context.Context, root, home string, selection Selection) (Registration, error) {
+	registration, err := s.Prepare(ctx, root, home, selection)
+	if err != nil {
+		return Registration{}, err
+	}
+	return registration.Apply()
+}
+
+// Prepare confirms a selection and renders the exact file without changing
+// disk. The caller can show File to a person before calling Apply.
+func (s Service) Prepare(ctx context.Context, root, home string, selection Selection) (Registration, error) {
 	if err := selection.validate(); err != nil {
 		return Registration{}, err
 	}
@@ -113,10 +124,7 @@ func (s Service) Register(ctx context.Context, root, home string, selection Sele
 		return Registration{}, err
 	}
 
-	changed, err := config.Write(locations.File, file)
-	if err != nil {
-		return Registration{}, err
-	}
+	changed := readErr != nil || !bytes.Equal(existing, file)
 	return Registration{
 		Selection: selection,
 		Target:    target,
@@ -124,6 +132,16 @@ func (s Service) Register(ctx context.Context, root, home string, selection Sele
 		Path:      locations.File,
 		Changed:   changed,
 	}, nil
+}
+
+// Apply writes the exact bytes produced by Prepare.
+func (r Registration) Apply() (Registration, error) {
+	changed, err := config.Write(r.Path, r.File)
+	if err != nil {
+		return Registration{}, err
+	}
+	r.Changed = changed
+	return r, nil
 }
 
 // Analysis names the background analysis registration will watch, and who

@@ -10,6 +10,7 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/discovery"
 	"github.com/AndrewMaged814/safelane/internal/release"
+	"github.com/AndrewMaged814/safelane/internal/releasepatch"
 )
 
 // RegisterOptions are everything `safelane register` needs.
@@ -24,6 +25,8 @@ type RegisterOptions struct {
 	ForceJSON bool
 	Service   discovery.Service
 	Stdin     io.Reader
+	Confirm   io.Reader
+	Apply     bool
 }
 
 // Register confirms a selection against a fresh read of the cluster, writes the
@@ -41,15 +44,35 @@ func Register(ctx context.Context, opts RegisterOptions, stdout, stderr io.Write
 		selection.Application = name
 	}
 
-	registered, err := opts.Service.Register(ctx, opts.Root, opts.Home, selection)
+	registered, err := opts.Service.Prepare(ctx, opts.Root, opts.Home, selection)
 	if err != nil {
 		return writeResultError(stderr, "register", err)
+	}
+
+	if !opts.Apply && RenderingFor(stdout, opts.ForceJSON) == RenderText {
+		fmt.Fprintf(stdout, "SafeLane will write %s:\n\n%s\n", registered.Path, registered.File)
+		fmt.Fprint(stdout, "Write this registration? ")
+		answer, readErr := io.ReadAll(opts.Confirm)
+		if readErr != nil {
+			return writeResultError(stderr, "register", readErr)
+		}
+		if !releasepatch.IsApproval(string(answer), true) {
+			fmt.Fprintln(stdout, "Nothing was changed.")
+			return ExitOK
+		}
+		opts.Apply = true
+	}
+	if opts.Apply {
+		registered, err = registered.Apply()
+		if err != nil {
+			return writeResultError(stderr, "register", err)
+		}
 	}
 
 	if RenderingFor(stdout, opts.ForceJSON) == RenderJSON {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
-		if err := encoder.Encode(newRegistrationResult(registered)); err != nil {
+		if err := encoder.Encode(newRegistrationResult(registered, opts.Apply)); err != nil {
 			return writeResultError(stderr, "register", err)
 		}
 		return ExitOK
@@ -66,6 +89,7 @@ type registrationResult struct {
 	Environment string   `json:"environment"`
 	Path        string   `json:"path"`
 	Changed     bool     `json:"changed"`
+	Applied     bool     `json:"applied"`
 	File        string   `json:"file"`
 	Rollout     string   `json:"rollout"`
 	Container   string   `json:"container"`
@@ -75,13 +99,14 @@ type registrationResult struct {
 	Artifact    []string `json:"artifact_warnings,omitempty"`
 }
 
-func newRegistrationResult(r discovery.Registration) registrationResult {
+func newRegistrationResult(r discovery.Registration, applied bool) registrationResult {
 	analysis, provider := r.Analysis()
 	result := registrationResult{
 		Application: r.Selection.Application,
 		Environment: r.Selection.Environment,
 		Path:        r.Path,
 		Changed:     r.Changed,
+		Applied:     applied,
 		File:        string(r.File),
 		Rollout:     r.Target.Rollout,
 		Container:   r.Selection.Container,

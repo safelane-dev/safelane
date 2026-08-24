@@ -11,9 +11,10 @@ Per-app data lives in `cluster/apps/<app>/`: an `app.env` plus the two
 manifests that differ between applications. The scripts are generic; only the
 data changes.
 
-SafeLane itself does not provision clusters — it verifies evidence, decides a
-lane, renders manifests and coordinates Argo. This folder is the other half:
-the infrastructure workstream's environment, reproducible.
+SafeLane itself does not provision clusters or render application manifests.
+It verifies release evidence, validates an agent recommendation, changes only
+the selected image and canary steps, and coordinates Argo. This folder is the
+external, reproducible demo environment.
 
 ## Stages
 
@@ -24,7 +25,6 @@ the infrastructure workstream's environment, reproducible.
 | 3 | `30-baseline.sh` | the app at a healthy baseline digest, Services, and any AnalysisTemplate or Ingress |
 | 4 | `40-loadgen.sh` | constant traffic, through the ingress or straight at the Service |
 | 5 | `50-identities.sh` | `safelane-caller` and `safelane-controller` ServiceAccounts |
-| 6 | `60-probe.sh` | pins the analysis probe to an immutable digest |
 
 Every stage is idempotent and independently runnable. Identities run **last**:
 that stage drops the default context to an identity that may only read
@@ -54,9 +54,15 @@ labelling the pod. Pod-role discovery scrapes perfectly happily and produces a
 ## Identities
 
 `50-identities.sh` rewrites your default kubeconfig context so the agent runs
-as `safelane-caller-<app>`, which may read rollouts and nothing else. Your original
-context is preserved as `safelane-admin` and the kubeconfig is backed up with a
-timestamp first.
+as `safelane-caller-<app>`. It may read the selected Rollout and the referenced
+Services and AnalysisTemplates, but it cannot mutate them. Your original
+context is preserved as `safelane-admin`, and the kubeconfig is backed up with
+a timestamp first.
+
+The controller credential is separate and derived at
+`~/.safelane/apps/<app>/environments/<environment>/identities/controller/kubeconfig`.
+Its Role can get and patch only the named Rollout and read AnalysisRuns. The
+controller context is not added to the ambient kubeconfig.
 
 ```bash
 kubectl auth can-i patch rollouts -n safelane-demo-api                    # no
@@ -75,24 +81,12 @@ SafeLane is bypassed entirely.
 | `PROM_CHART_VERSION` | `29.23.0` |
 | `GRAFANA_CHART_VERSION` | `10.5.15` |
 | `SAFELANE_APP` | `safelane-demo-api` — selects `cluster/apps/<app>/` |
+| `SAFELANE_ENVIRONMENT` | `production` — selects the derived identity path |
 
 Pin Argo Rollouts and do not bump it casually: `ComputeStepHash` is not stable
 across controller versions, and a change there can reset `currentStepIndex`
 mid-rollout.
 
-## The probe
-
-`safelane setup` writes a placeholder for the analysis probe image:
-
-```
-probe_image: ghcr.io/<owner>/<probe>@sha256:REPLACE_WITH_PUBLISHED_DIGEST
-```
-
-Something has to resolve the real digest and substitute it. The only code that
-ever did was `safelane demo up`, which no longer exists — so `safelane doctor`
-reports *"analysis probe not pinned by an immutable OCI digest"* and the
-release cannot run. Stage 6 does that substitution.
-
-The proper home for this is `safelane setup` itself: the command that writes
-the placeholder should be the one that fills it. Until it does, this keeps the
-configuration usable.
+The application package owns its background AnalysisTemplate. SafeLane reads
+that template and waits for fresh results; it never generates, patches, or
+replaces the application's health definition.

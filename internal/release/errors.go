@@ -1,6 +1,6 @@
 // Package release is SafeLane's rejection vocabulary.
 //
-// One error type, eight categories, and a rule: a rejection says what is
+// One error type, seven categories, and a rule: a rejection says what is
 // wrong, where, and what to change. The Remedy field is the whole reason this
 // exists rather than fmt.Errorf - an agent reading a failure needs to know what
 // to do next, and prose it has to interpret is prose it will interpret wrongly.
@@ -57,11 +57,6 @@ const (
 	// CategoryEvidenceMissing, and it must never be dropped.
 	CategoryEvidenceUnknown ErrorCategory = "evidence_unknown"
 
-	// CategoryRenderFailed covers a failure to render the operator-owned Release
-	// Template: template not found, template did not pin the verified digest,
-	// unsafe substitution value, undefined placeholder.
-	CategoryRenderFailed ErrorCategory = "render_failed"
-
 	// CategoryInternal covers SafeLane defects. It is never a caller's fault and
 	// never authorizes anything.
 	CategoryInternal ErrorCategory = "internal"
@@ -82,7 +77,6 @@ var (
 	ErrEvidenceMissing  error = categorySentinel{CategoryEvidenceMissing}
 	ErrEvidenceFailed   error = categorySentinel{CategoryEvidenceFailed}
 	ErrEvidenceUnknown  error = categorySentinel{CategoryEvidenceUnknown}
-	ErrRenderFailed     error = categorySentinel{CategoryRenderFailed}
 	ErrInternal         error = categorySentinel{CategoryInternal}
 )
 
@@ -186,11 +180,6 @@ func UnknownEvidenceError(code, field, message, remedy string) *Error {
 	return newError(CategoryEvidenceUnknown, code, field, message, remedy)
 }
 
-// RenderError builds a CategoryRenderFailed rejection.
-func RenderError(code, field, message, remedy string) *Error {
-	return newError(CategoryRenderFailed, code, field, message, remedy)
-}
-
 // Internal builds a CategoryInternal error.
 func Internal(code, message string) *Error {
 	return newError(CategoryInternal, code, "", message, "")
@@ -257,7 +246,6 @@ func Categorize(err error) ErrorCategory {
 		CategoryForbiddenField,
 		CategoryEvidenceFailed,
 		CategoryEvidenceMissing,
-		CategoryRenderFailed,
 		CategoryMalformedRequest,
 		CategoryInvalidRequest,
 	}

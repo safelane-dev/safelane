@@ -21,7 +21,7 @@
 // was given, that every observation cites evidence that exists, that every
 // hazard states what has to be true for it to happen and what happens then,
 // that coverage is one of four honest states with an explanation, and that a
-// proceeding result names a lane the operator configured and the one the risk
+// proceeding result names a configured lane and the one the risk
 // mapping points at.
 //
 // It does not check whether the judgement is right. There are no path rules, no
@@ -93,7 +93,7 @@ type Recommendation struct {
 	HistoryFindings []HistoryFinding `json:"history_findings,omitempty"`
 	Risk            Risk             `json:"risk"`
 	Action          Action           `json:"action"`
-	// Lane is set only when proceeding, and must be the lane the operator's
+	// Lane is set only when proceeding, and must be the lane the configured
 	// risk mapping points at.
 	Lane string `json:"lane,omitempty"`
 	// Rationale is the plain-language reason, in release language.
@@ -175,7 +175,7 @@ func Parse(raw []byte) (Recommendation, error) {
 }
 
 // Validate checks structure and grounding against the frozen evidence and the
-// operator's configuration.
+// saved configuration.
 //
 // It reports every problem at once, because a correction attempt that fixes one
 // thing and discovers the next is not a correction attempt, it is a queue.
@@ -294,10 +294,10 @@ func validateHistoryFindings(r Recommendation, known map[string]bool) release.Er
 }
 
 // validateDecision checks the two-value action, the risk vocabulary, and the
-// one rule that keeps lane selection with the operator: a proceeding
+// one rule that keeps lane selection in configuration: a proceeding
 // recommendation may only name the lane the configured risk mapping points at.
 //
-// The assessment judges risk. The operator decides what each risk level is
+// The assessment judges risk. The saved settings decide what each risk level is
 // worth in traffic. Letting a recommendation name any lane it liked would move
 // that decision into the assessment, quietly, one release at a time.
 func validateDecision(r Recommendation, policy config.Policy) release.Errors {

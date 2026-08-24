@@ -246,9 +246,15 @@ func Proof(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) i
 			return writeResultError(stderr, "proof", loadErr)
 		}
 		if !found {
+			record, found, loadErr = store.Latest()
+			if loadErr != nil {
+				return writeResultError(stderr, "proof", loadErr)
+			}
+		}
+		if !found {
 			return writeResultError(stderr, "proof", release.Invalid("no_release_to_detail", "release",
-				fmt.Sprintf("there is no release of %s to %s in progress", application, environment.Name),
-				"Ask for the history instead, or start a release."))
+				fmt.Sprintf("there is no release record for %s in %s", application, environment.Name),
+				"Start a release first."))
 		}
 		return writeControlJSON(stdout, stderr, "proof", map[string]any{
 			"record":  record,

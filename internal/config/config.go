@@ -10,7 +10,7 @@ import (
 
 // Risk is an assessment outcome. It is not a number and it is not computed
 // here: an assessment reports one of these three, and [Policy.RiskMapping]
-// turns it into a lane the operator already declared.
+// turns it into a lane already present in the saved settings.
 type Risk string
 
 const (
@@ -24,7 +24,7 @@ const (
 // the default and hide a configuration mistake behind a working release.
 var Risks = []Risk{RiskLow, RiskMedium, RiskHigh}
 
-// Impact is how much a given Environment matters. It is the operator's
+// Impact is how much a given Environment matters. It is the user's
 // statement about consequences, made once at registration, and it is an input
 // to assessment rather than an output of it.
 type Impact string
@@ -87,7 +87,7 @@ type Kubernetes struct {
 	Rollout   string `yaml:"rollout"`
 }
 
-// Policy is the operator's block. Registration writes it once, from the
+// Policy is the release-settings block. Registration writes it once, from the
 // compiled defaults, and never touches it again: [Reconcile] carries whatever
 // is here across byte-for-byte.
 type Policy struct {
@@ -97,7 +97,7 @@ type Policy struct {
 	DefaultLane string `yaml:"default_lane"`
 	// RiskMapping maps each of the three risk levels to a declared lane.
 	RiskMapping map[Risk]string `yaml:"risk_mapping"`
-	// Lanes are every rollout envelope the operator allows, keyed by name.
+	// Lanes are every configured rollout envelope, keyed by name.
 	Lanes map[string]Lane `yaml:"lanes"`
 }
 
@@ -158,7 +158,7 @@ func (p Policy) LaneNames() []string {
 
 // DefaultPolicy is the policy block registration writes for a new Application:
 // three lanes, and the obvious mapping onto them. Registration compiles these
-// once and then never revisits them, so an operator who edits a weight keeps
+// once and then never revisits them, so a user who edits a weight keeps
 // that edit through every later registration.
 func DefaultPolicy() Policy {
 	return Policy{

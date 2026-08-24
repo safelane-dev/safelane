@@ -18,7 +18,8 @@
 // stdout is not a terminal and readable text when it is, so the same command
 // serves a script and a person. There is no `--yes`, because a flag the caller
 // passes every time is not a safety mechanism - at a terminal `run` asks, and
-// piped, the frozen recommendation is the authorization.
+// piped, the agent records the user's direct answer through a hidden adapter
+// before run. A recommendation is advice, never authorization.
 //
 // The Environment is always the positional argument, because it is the one
 // thing the user actually says. No command takes a release identifier: there
@@ -121,10 +122,34 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "name the application when this repository is registered as more than one")
 
 	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectCommand(rt),
-		recommendCommand(rt), runCommand(rt))
+		recommendCommand(rt), approveCommand(rt), registerApplyCommand(rt), runCommand(rt))
 	root.AddCommand(naturalControls(rt)...)
 	root.AddCommand(completionCommand(root), versionCommand())
 	return root
+}
+
+// approveCommand is hidden because it is an adapter for the active agent
+// session, not another concept the user must learn. The agent passes the
+// user's exact answer after showing the final approval question.
+func approveCommand(rt commandRuntime) *cobra.Command {
+	cmd := withJSON(&cobra.Command{
+		Use:    "approve <env> <answer>",
+		Short:  "Record the user's answer to the final rollout question",
+		Hidden: true,
+		Args:   cobra.MinimumNArgs(2),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			return exit(cli.Approve(cmd.Context(), cli.ApproveOptions{
+				Root: rt.root, Home: home, Environment: args[0], App: rt.app,
+				Answer: strings.Join(args[1:], " "), ForceJSON: jsonFlag(cmd),
+				Origin: discovery.GitHubOrigin,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+	return cmd
 }
 
 // readers builds the three production ports. They are values on the options
@@ -189,9 +214,33 @@ func registerCommand(rt commandRuntime) *cobra.Command {
 				ForceJSON:     jsonFlag(cmd),
 				Service:       discovery.Service{},
 				Stdin:         os.Stdin,
+				Confirm:       os.Stdin,
 			}, rt.stdout, rt.stderr))
 		},
 	})
+}
+
+// registerApplyCommand is the agent adapter used only after the person has
+// seen the complete preview produced by register and approved that exact file.
+func registerApplyCommand(rt commandRuntime) *cobra.Command {
+	cmd := withJSON(&cobra.Command{
+		Use:    "register-apply <selection-json-path|->",
+		Short:  "Write a registration that the user already approved",
+		Hidden: true,
+		Args:   cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			return exit(cli.Register(cmd.Context(), cli.RegisterOptions{
+				Root: rt.root, Home: home, SelectionPath: args[0], App: rt.app,
+				ForceJSON: jsonFlag(cmd), Service: discovery.Service{}, Stdin: os.Stdin,
+				Apply: true,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+	return cmd
 }
 
 // inspectCommand freezes the evidence boundary for one release.

@@ -89,6 +89,15 @@ func TestDiscoverListsRolloutsWithTheirContainers(t *testing.T) {
 	if !rollout.Environment.Supported {
 		t.Errorf("unsupported: %+v", rollout.Environment.Reasons)
 	}
+	if rollout.Fingerprint == "" {
+		t.Error("discovery did not return the fingerprint registration requires")
+	}
+	if len(rollout.Analysis) != 1 || rollout.Analysis[0].Name != "success-rate" {
+		t.Errorf("discovery did not return the selected rollout's health analysis: %+v", rollout.Analysis)
+	}
+	if !rollout.Artifact.Supported {
+		t.Errorf("artifact unsupported: %+v", rollout.Artifact.Reasons)
+	}
 }
 
 // The context is reported so a person can see which cluster answered. Nothing
@@ -291,9 +300,12 @@ func TestZeroOneAndManyContainers(t *testing.T) {
 		"many": {containers: `{"name":"api","image":"ghcr.io/o/i:v1"},{"name":"sidecar","image":"ghcr.io/o/s:v1"}`, want: 2, supported: true},
 	} {
 		t.Run(name, func(t *testing.T) {
+			rolloutDoc := build(tc.containers)
 			c := &cluster{responses: map[string]string{
-				"config current-context":                   "ctx",
-				"get rollouts.argoproj.io -n apps -o json": list(build(tc.containers)),
+				"config current-context":                     "ctx",
+				"get rollouts.argoproj.io -n apps -o json":   list(rolloutDoc),
+				"get rollouts.argoproj.io r -n apps -o json": rolloutDoc,
+				"get analysistemplate t -o json -n apps":     `{"metadata":{"name":"t"},"spec":{"metrics":[{"name":"ok","provider":{"prometheus":{"query":"up"}}}]}}`,
 			}}
 			found, err := serviceWith(c).Discover(context.Background(), ".", "apps")
 			if err != nil {

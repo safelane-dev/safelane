@@ -180,7 +180,7 @@ func IsApproval(text string, answeringApprovalQuestion bool) bool {
 	normalised = strings.TrimRight(normalised, ".!")
 
 	switch normalised {
-	case "approve", "approved", "go ahead", "release it", "ship it", "yes, proceed", "proceed":
+	case "approve", "approve this", "approved", "go ahead", "release it", "ship it", "yes, proceed", "proceed":
 		return true
 	case "yes", "y", "yep", "yeah", "ok", "okay", "sure":
 		return answeringApprovalQuestion

@@ -33,7 +33,11 @@ export STABLE_SERVICE CANARY_SERVICE
 resolve_digest() {
   local repo="$1" tag="$2" token
   token="$(curl -fsSL "https://ghcr.io/token?scope=repository:${repo}:pull" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin)["token"])')"
+    | sed -n 's/.*"token":"\([^"]*\)".*/\1/p')"
+  if [ -z "${token}" ]; then
+    echo "GHCR did not return a pull token for ${repo}." >&2
+    return 1
+  fi
   curl -fsSLI -H "Authorization: Bearer ${token}" \
     -H "Accept: application/vnd.oci.image.index.v1+json,application/vnd.docker.distribution.manifest.list.v2+json,application/vnd.oci.image.manifest.v1+json,application/vnd.docker.distribution.manifest.v2+json" \
     "https://ghcr.io/v2/${repo}/manifests/${tag}" \

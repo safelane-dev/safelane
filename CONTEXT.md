@@ -1,79 +1,129 @@
 # SafeLane
 
-SafeLane coordinates one approved, evidence-bound software release to a terminal outcome while keeping production exposure inside operator-declared rules.
+SafeLane coordinates one approved, evidence-bound application release through
+an existing Argo Rollout to a terminal outcome.
 
 ## Language
 
 **Release Request**:
-The identity of one exact merged change and target environment: repository, pull request, and environment.
-_Avoid_: Latest pull request, deployment request
+The user's request to release an Application to an Environment. It may include
+an exact source revision.
+_Avoid_: Pull request release, release the latest PR
 
-**Change Dossier**:
-The bounded evidence SafeLane constructs for assessment: exact diff, artifact, CI evidence, critical surfaces, approved runtime assertions, deterministic findings, and truncation state.
-_Avoid_: Prompt context, caller-supplied evidence
+**Application**:
+One independently releasable workload, such as `payments-api`.
+_Avoid_: Repository, pull request
 
-**Safety Contract**:
-The frozen, hashed agreement for one release attempt: artifact identity, hazards, runtime assertions, lane, progression authority, rendered bundle, and target.
-_Avoid_: Rollout plan, model recommendation
+**Environment**:
+A named place where an Application runs, such as `production` or `staging`.
+It has a confirmed impact and one registered Deployment Target.
+_Avoid_: Namespace, cluster
+
+**Artifact**:
+The immutable OCI image that is running or proposed for release, bound to an
+exact source revision by verified metadata.
+_Avoid_: Mutable tag, build name
+
+**Release Candidate**:
+The exact Artifact proposed for an Environment, its source revision, CI result,
+and all changes since the running baseline. Pull requests and commits are
+provenance; SafeLane releases the Artifact.
+_Avoid_: Pull request, latest build
+
+**Deployment Target**:
+The current Kubernetes context, namespace, Argo Rollout, and selected container
+that implement one Application Environment.
+_Avoid_: Environment
+
+**Registration**:
+The confirmed mapping from an Application and Environment to a discovered
+Deployment Target. Registration previews and writes one minimal `safelane.yml`.
+It does not provision Kubernetes resources.
+_Avoid_: Generated setup plan, generated baseline
+
+**Release Settings**:
+The configured default lane, risk-to-lane mapping, and lane weights in
+`safelane.yml`. Registration writes product defaults once and preserves later
+user edits.
+_Avoid_: Policy engine, generated policy
+
+**Release Delta**:
+The frozen evidence for one candidate: changes, deployment, configured health
+analysis, relevant history, and the proposed patch. It is content-addressed and
+excludes secret values.
+_Avoid_: Change Dossier, prompt context
+
+**Eligibility**:
+The evidence-based answer to whether the exact candidate may be assessed for
+release. Failed CI, missing Artifact binding, or an invalid change relationship
+is ineligible, not high risk.
+
+**Deployment Assessment**:
+The active agent's grounded judgement of credible deployment hazards for a
+Release Delta. SafeLane validates its snapshot, evidence citations, causal
+structure, coverage, and configured lane; it does not grade the semantics with
+path or size rules.
+_Avoid_: General code review, deterministic risk score
 
 **Hazard**:
-A cited failure mode connected to an affected surface and a required runtime assertion.
-_Avoid_: Vague concern, risk score
+A credible way this release could cause harm, with cited evidence,
+preconditions, and a concrete consequence.
+_Avoid_: Vague concern, lint finding
 
-**Runtime Assertion**:
-A concrete, executable claim about the canary-only application surface, such as response semantics, success rate, latency, or artifact identity.
-_Avoid_: Health check, generic healthy metric
+**Coverage**:
+Whether the Application's configured background health analysis would detect a
+Hazard: covered, partially covered, not covered, or unknown.
+_Avoid_: SafeLane-generated assertion
 
-**Semantic Findings**:
-Evidence-backed application meaning supplied by a replaceable repository analyst during setup: application risk paths and behavioral assertion intents. SafeLane may use conservative internal findings when no analyst is present and always compiles intents into executable Runtime Assertions.
-_Avoid_: Agent proposal, setup baseline
-
-**Setup Plan**:
-The immutable, content-addressed operator configuration SafeLane compiles from repository facts, Semantic Findings, and product safety rules before setup approval.
-_Avoid_: Editable setup proposal, generated baseline
-
-**Change Assessment**:
-The combined deterministic and semantic account of hazards and reversibility. A semantic assessor may raise deterministic risk but never lower it or choose operations.
-_Avoid_: Model decision, confidence score
+**Recommendation**:
+The grounded result of a Deployment Assessment: Proceed through one configured
+Release Lane, or Wait with one useful next step.
+_Avoid_: Authorization, prediction that code is safe
 
 **Release Lane**:
-An operator-declared sequence of bounded traffic exposures. The canonical lanes are Fast (`50 → 100`), Standard (`25 → 50 → 100`), and Guarded (`25 → 50 → 75 → 100`).
-_Avoid_: Model-chosen weights, caller-selected rollout
+A configured sequence of bounded canary exposures. The defaults are Fast
+(`50 → 100`), Standard (`25 → 50 → 100`), and Guarded
+(`25 → 50 → 75 → 100`).
+_Avoid_: Agent-generated weights, user-named lane during approval
 
-**Progression Authority**:
-The maximum exposure already approved by the Safety Contract. It may stop before the end of a lane when a specific hazard is not covered.
-_Avoid_: Kubernetes permission, blanket autonomy
+**Release Patch**:
+The exact JSON Patch that changes only the selected container image and Argo
+canary steps, guarded by the observed Rollout identity and version.
+_Avoid_: Rendered bundle, generated Kubernetes manifest
 
-**Uncovered Hazard**:
-A Hazard with no approved Runtime Assertion that exercises its affected surface. It may require a hazard-specific risk acceptance or stop the release before exposure.
-
-**Risk Acceptance**:
-A durable, hazard-specific human decision to continue despite an Uncovered Hazard when policy allows it. It never records the hazard as covered.
-_Avoid_: Override, ignore warning
+**Approval**:
+One explicit human decision bound to the exact candidate, target,
+recommendation, and Release Patch. It is spent once. A recommendation is not
+approval.
+_Avoid_: Reusable approval, `--yes`
 
 **Release Attempt**:
-One immutable Safety Contract and its reconciled execution history. Retrying creates a new attempt rather than mutating a terminal one.
+One Release Delta, Recommendation, Approval, Release Patch, event history, and
+terminal outcome. A retry is a new attempt.
 
 **Release Run**:
-The attached coordination loop that reconciles a Release Attempt, requests only authorized Argo progression, and remains attached until a terminal or decision-required outcome.
-_Avoid_: Gate command, autonomous deployment engine
+The attached, reconnectable coordination loop. It asks Argo to progress only
+after a fresh successful background measurement at the current gate and stays
+attached until completion or stop.
+_Avoid_: Gate-by-gate approval, autonomous deployment engine
 
 **Argo Abort**:
-Argo Rollouts' response to failed runtime analysis. Argo owns analysis evaluation, traffic restoration, and normal-path rollback; SafeLane observes and records the outcome.
+Argo Rollouts' response to failed configured analysis. Argo owns analysis,
+traffic restoration, and normal rollback; SafeLane observes and records it.
 _Avoid_: SafeLane rollback
 
-**Emergency Control**:
-The explicitly separate pause, resume, or abort path with caller, timestamp, and reason. Normal Release Run never uses it to react to analysis failure.
-_Avoid_: Normal progression, silent resume
+**Release Control**:
+The user's hold, continue, or stop action, recorded with a reason. The observed
+Rollout is authoritative when it disagrees with SafeLane's record.
+_Avoid_: Emergency ID, direct gate mutation
 
 **Release Proof**:
-The durable Artifact, Assessment, Decision, Execution, Boundary, and Outcome record for one Release Attempt.
-_Avoid_: Console log, deployment status
+The compact history card or detailed durable record of a Release Attempt.
+Detailed proof loads only when requested.
+_Avoid_: Conversation transcript, tool trace
 
-**Demo Application**:
-The first-party SafeLane Demo API whose `/healthz` remains green while `/api/demo` can fail semantically, by availability, or by latency.
-_Avoid_: Generic sample workload
+## Evidence language
 
-**External Probe**:
-The digest-pinned, permissionless Analysis Job that verifies canary identity and sends bounded requests only to the canary Service.
-_Avoid_: `/api/analysis`, stable-traffic smoke test
+Describe evidence by the action that established it: configured, discovered,
+confirmed, provided, or approved. Do not use ownership labels when the concrete
+action is clearer.

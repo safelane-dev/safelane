@@ -284,6 +284,26 @@ func TestProofIsCompactUnlessDetailsAreAsked(t *testing.T) {
 	}
 }
 
+func TestDetailedProofRemainsAvailableAfterCompletion(t *testing.T) {
+	opts, store := controlOptions(t)
+	record, _, err := store.Active()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record.Delta = json.RawMessage(`{"snapshot_id":"sha256:complete"}`)
+	if _, err := store.Finish(record, journal.StateCompleted, "released at 100%", "", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	opts.Details = true
+	var stdout, stderr bytes.Buffer
+	if code := Proof(context.Background(), opts, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("proof --details after completion: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "sha256:complete") || !strings.Contains(stdout.String(), "completed") {
+		t.Fatalf("terminal proof is incomplete: %s", stdout.String())
+	}
+}
+
 func TestStatusIsJSONWhenPiped(t *testing.T) {
 	opts, _ := controlOptions(t)
 	var stdout, stderr bytes.Buffer

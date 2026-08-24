@@ -45,7 +45,7 @@
 //   - the discovered blocks (application, artifact, environments) are
 //     regenerated from what was observed;
 //   - the policy block is carried across byte-for-byte, comments and all,
-//     because the operator wrote it and discovery has no opinion about it;
+//     because it is already configured and discovery has no opinion about it;
 //   - an Environment is matched by name, so re-registering `production`
 //     replaces that entry and leaves `staging` untouched.
 //

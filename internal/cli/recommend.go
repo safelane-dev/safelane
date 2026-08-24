@@ -39,6 +39,19 @@ func Recommend(ctx context.Context, opts RecommendOptions, stdout, stderr io.Wri
 	if err != nil {
 		return writeResultError(stderr, "recommend", err)
 	}
+	application, err := applicationFrom(opts.Inspect.Root, opts.Inspect.Home,
+		opts.Inspect.App, opts.Inspect.Cluster.Origin)
+	if err != nil {
+		return writeResultError(stderr, "recommend", err)
+	}
+	inspection, found, err := loadInspection(config.ForApp(opts.Inspect.Home, application).
+		ForEnvironment(opts.Inspect.Environment).Dir)
+	if err != nil {
+		return writeResultError(stderr, "recommend", err)
+	}
+	if found {
+		opts.Inspect.Revision = inspection.Revision
+	}
 
 	frozen, eligibility, err := FreezeDelta(ctx, opts.Inspect)
 	if err != nil {
@@ -186,6 +199,16 @@ func savePending(ctx context.Context, opts RecommendOptions, cfg config.Config,
 		At:          frozen.CapturedAt(),
 		Attempts:    attempt,
 	}
+	deltaRaw, err := json.Marshal(frozen)
+	if err != nil {
+		return err
+	}
+	pending.Delta = deltaRaw
+	recommendationRaw, err := json.Marshal(recommendation)
+	if err != nil {
+		return err
+	}
+	pending.Recommendation = recommendationRaw
 	for _, objective := range frozen.Health() {
 		pending.Analysis = append(pending.Analysis, string(objective.Name))
 	}

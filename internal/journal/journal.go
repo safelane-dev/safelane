@@ -58,12 +58,16 @@ type Record struct {
 	Patch          json.RawMessage `json:"patch,omitempty"`
 	Approval       json.RawMessage `json:"approval,omitempty"`
 
-	Events  []Event   `json:"events"`
-	Weight  int       `json:"weight,omitempty"`
-	Reason  string    `json:"reason,omitempty"`
-	Outcome string    `json:"outcome,omitempty"`
-	Started time.Time `json:"started"`
-	Ended   time.Time `json:"ended,omitempty"`
+	Events []Event `json:"events"`
+	Weight int     `json:"weight,omitempty"`
+	// SuccessfulAtLastGate makes the "fresh measurement" rule durable across
+	// process restarts. A reconnect must not reuse the reading that widened the
+	// previous gate.
+	SuccessfulAtLastGate int       `json:"successful_at_last_gate,omitempty"`
+	Reason               string    `json:"reason,omitempty"`
+	Outcome              string    `json:"outcome,omitempty"`
+	Started              time.Time `json:"started"`
+	Ended                time.Time `json:"ended,omitempty"`
 }
 
 // Status renders this record's line.
@@ -95,6 +99,7 @@ type Store struct {
 
 func (s Store) recordsDir() string  { return filepath.Join(s.Dir, "releases") }
 func (s Store) activePath() string  { return filepath.Join(s.Dir, "active") }
+func (s Store) latestPath() string  { return filepath.Join(s.Dir, "latest") }
 func (s Store) historyPath() string { return filepath.Join(s.Dir, "history.jsonl") }
 
 func (s Store) recordPath(id string) string {
@@ -202,6 +207,19 @@ func (s Store) Active() (Record, bool, error) {
 	return s.Load(strings.TrimSpace(string(raw)))
 }
 
+// Latest is the newest terminal record. It keeps detailed proof reachable
+// after Finish releases the active slot.
+func (s Store) Latest() (Record, bool, error) {
+	raw, err := os.ReadFile(s.latestPath())
+	if os.IsNotExist(err) {
+		return Record{}, false, nil
+	}
+	if err != nil {
+		return Record{}, false, err
+	}
+	return s.Load(strings.TrimSpace(string(raw)))
+}
+
 // Append adds an event and saves. Events are only ever appended.
 func (s Store) Append(record Record, event Event) (Record, error) {
 	record.Events = append(record.Events, event)
@@ -232,6 +250,9 @@ func (s Store) Finish(record Record, state State, outcome, reason string, now ti
 		return record, err
 	}
 	if err := s.appendCard(record.Card()); err != nil {
+		return record, err
+	}
+	if err := writeFileAtomic(s.latestPath(), []byte(record.ID+"\n")); err != nil {
 		return record, err
 	}
 	if err := os.Remove(s.activePath()); err != nil && !os.IsNotExist(err) {

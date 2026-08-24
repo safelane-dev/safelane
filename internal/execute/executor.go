@@ -37,7 +37,7 @@ func realRun(ctx context.Context, args []string, stdin []byte) ([]byte, error) {
 	return stdout.Bytes(), nil
 }
 
-// Config names the target Rollout and, when the operator has configured
+// Config names the target Rollout and, when setup has configured
 // separate identities (Appendix C5, tasks 14/20), the privileged
 // controller credential.
 //

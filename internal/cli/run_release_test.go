@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/journal"
 	"github.com/AndrewMaged814/safelane/internal/releasepatch"
 )
 
@@ -37,6 +38,31 @@ func runOptions(opts InspectOptions) RunOptions {
 	return RunOptions{
 		Inspect: opts,
 		Now:     func() time.Time { return time.Date(2026, 8, 21, 12, 30, 0, 0, time.UTC) },
+	}
+}
+
+func approvePending(t *testing.T, opts InspectOptions, answer string) {
+	t.Helper()
+	var stdout, stderr bytes.Buffer
+	if code := Approve(context.Background(), ApproveOptions{
+		Root: ".", Home: opts.Home, Environment: "production",
+		Origin: func(string) (string, error) { return "acme/payments-api", nil },
+		Answer: answer,
+		Now:    func() time.Time { return time.Date(2026, 8, 21, 12, 29, 0, 0, time.UTC) },
+	}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("approve: %s", stderr.String())
+	}
+}
+
+func completingCoordinator(applied *int) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
+	return func(_ context.Context, record journal.Record, _ releasepatch.Patch) (journal.Record, error) {
+		if applied != nil {
+			*applied++
+		}
+		record.State = journal.StateCompleted
+		record.Weight = 100
+		record.Outcome = "released"
+		return record, nil
 	}
 }
 
@@ -72,24 +98,106 @@ func TestRunRefusesAWaitingRecommendation(t *testing.T) {
 	}
 }
 
-// Piped, the frozen recommendation is the authorization and nothing is asked.
-// A flag the caller passes on every invocation is not a safety mechanism.
-func TestRunDoesNotAskWhenPiped(t *testing.T) {
+// A recommendation is advice, not authorization. The agent path is piped, so
+// it must record the user's explicit answer before `run` may touch the cluster.
+func TestRunRefusesWhenPipedWithoutExplicitApproval(t *testing.T) {
 	opts := recommended(t)
 	applied := 0
 
 	var stdout, stderr bytes.Buffer
 	run := runOptions(opts)
-	run.Apply = func(context.Context, releasepatch.Patch) error { applied++; return nil }
+	run.Coordinate = completingCoordinator(&applied)
 
+	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
+		t.Fatal("run released without an explicit approval")
+	}
+	if applied != 0 {
+		t.Errorf("applied %d times", applied)
+	}
+	if !strings.Contains(stderr.String(), "explicit approval") {
+		t.Errorf("stderr = %q", stderr.String())
+	}
+}
+
+func TestAgentApprovalBindsThePendingRecommendationBeforeRun(t *testing.T) {
+	opts := recommended(t)
+	applied := 0
+	approvePending(t, opts, "approve this")
+
+	run := runOptions(opts)
+	run.Coordinate = completingCoordinator(&applied)
+	var stdout, stderr bytes.Buffer
 	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
-		t.Fatalf("exit: %s", stderr.String())
+		t.Fatalf("run: %s", stderr.String())
 	}
 	if applied != 1 {
 		t.Errorf("applied %d times", applied)
 	}
-	if strings.Contains(stdout.String(), "Proceed with this rollout") {
-		t.Errorf("a piped run asked a question:\n%s", stdout.String())
+}
+
+func TestRunStartsOneDurableAttachedRelease(t *testing.T) {
+	opts := recommended(t)
+	approvePending(t, opts, "approve this")
+	called := 0
+	run := runOptions(opts)
+	run.Coordinate = func(_ context.Context, record journal.Record, patch releasepatch.Patch) (journal.Record, error) {
+		called++
+		if record.Application != "payments-api" || record.Environment != "production" {
+			t.Fatalf("record = %+v", record)
+		}
+		if len(record.Delta) == 0 || len(record.Recommendation) == 0 || len(record.Approval) == 0 {
+			t.Fatalf("release proof inputs are incomplete: %+v", record)
+		}
+		if patch.CandidateImage == "" {
+			t.Fatal("coordinator received an empty patch")
+		}
+		record.State = journal.StateCompleted
+		record.Weight = 100
+		record.Outcome = "released"
+		return record, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("run: %s", stderr.String())
+	}
+	if called != 1 {
+		t.Fatalf("coordinator called %d times", called)
+	}
+}
+
+func TestRunReconnectsAnActiveReleaseWithoutAnotherApproval(t *testing.T) {
+	opts := recommended(t)
+	approvePending(t, opts, "approve this")
+	store := journal.Store{Dir: environmentDir(t, opts)}
+	calls := 0
+	run := runOptions(opts)
+	run.Coordinate = func(_ context.Context, record journal.Record, _ releasepatch.Patch) (journal.Record, error) {
+		calls++
+		if calls == 1 {
+			record.State = journal.StateMonitoring
+			if _, err := store.Start(record); err != nil {
+				t.Fatal(err)
+			}
+			return record, context.Canceled
+		}
+		record.State = journal.StateCompleted
+		record.Weight = 100
+		record.Outcome = "released"
+		return record, nil
+	}
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
+		t.Fatal("interrupted attached run reported completion")
+	}
+	stdout.Reset()
+	stderr.Reset()
+	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("reconnect: %s", stderr.String())
+	}
+	if calls != 2 {
+		t.Fatalf("coordinator calls = %d, want 2", calls)
 	}
 }
 
@@ -101,7 +209,7 @@ func TestRunAsksAtATerminal(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	run := runOptions(opts)
 	run.Confirm = strings.NewReader("yes\n")
-	run.Apply = func(context.Context, releasepatch.Patch) error { applied++; return nil }
+	run.Coordinate = completingCoordinator(&applied)
 
 	if code := Run(context.Background(), run, &terminal{&stdout}, &stderr); code != ExitOK {
 		t.Fatalf("exit: %s", stderr.String())
@@ -121,7 +229,7 @@ func TestAnAnswerThatIsNotApprovalChangesNothing(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	run := runOptions(opts)
 	run.Confirm = strings.NewReader("not yet\n")
-	run.Apply = func(context.Context, releasepatch.Patch) error { applied++; return nil }
+	run.Coordinate = completingCoordinator(&applied)
 
 	if code := Run(context.Background(), run, &terminal{&stdout}, &stderr); code != ExitOK {
 		t.Fatalf("exit: %s", stderr.String())
@@ -138,8 +246,9 @@ func TestAnAnswerThatIsNotApprovalChangesNothing(t *testing.T) {
 func TestAnApprovalCannotBeSpentTwice(t *testing.T) {
 	opts := recommended(t)
 	applied := 0
+	approvePending(t, opts, "release it")
 	run := runOptions(opts)
-	run.Apply = func(context.Context, releasepatch.Patch) error { applied++; return nil }
+	run.Coordinate = completingCoordinator(&applied)
 
 	var stdout, stderr bytes.Buffer
 	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
@@ -151,7 +260,7 @@ func TestAnApprovalCannotBeSpentTwice(t *testing.T) {
 	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
 		t.Fatal("the approval was spent twice")
 	}
-	if !strings.Contains(stderr.String(), "already used") {
+	if !strings.Contains(stderr.String(), "no recommendation waiting for approval") {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 	if applied != 1 {
@@ -173,10 +282,11 @@ func TestAMaterialChangeCancelsTheApprovalAndChangesNothing(t *testing.T) {
 	if err := releasepatch.SavePending(environmentDir(t, opts), pending); err != nil {
 		t.Fatal(err)
 	}
+	approvePending(t, opts, "go ahead")
 
 	applied := 0
 	run := runOptions(opts)
-	run.Apply = func(context.Context, releasepatch.Patch) error { applied++; return nil }
+	run.Coordinate = completingCoordinator(&applied)
 
 	var stdout, stderr bytes.Buffer
 	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
@@ -252,17 +362,19 @@ func TestTheCorrectionCounterSurvivesResubmission(t *testing.T) {
 
 func TestRunIsJSONWhenPiped(t *testing.T) {
 	opts := recommended(t)
+	approvePending(t, opts, "release it")
 	run := runOptions(opts)
-	run.Apply = func(context.Context, releasepatch.Patch) error { return nil }
+	run.Coordinate = completingCoordinator(nil)
 
 	var stdout, stderr bytes.Buffer
 	if code := Run(context.Background(), run, &stdout, &stderr); code != ExitOK {
 		t.Fatalf("exit: %s", stderr.String())
 	}
 	var result struct {
-		Application string                `json:"application"`
-		Lane        string                `json:"lane"`
-		Approval    releasepatch.Approval `json:"approval"`
+		Application string        `json:"application"`
+		Lane        string        `json:"lane"`
+		State       journal.State `json:"state"`
+		Outcome     string        `json:"outcome"`
 	}
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		t.Fatalf("piped output is not JSON: %v\n%s", err, stdout.String())
@@ -270,7 +382,7 @@ func TestRunIsJSONWhenPiped(t *testing.T) {
 	if result.Application != "payments-api" || result.Lane != "fast" {
 		t.Errorf("result = %+v", result)
 	}
-	if result.Approval.UsedAt.IsZero() {
-		t.Error("the approval was not recorded as spent")
+	if result.State != journal.StateCompleted || result.Outcome != "released" {
+		t.Errorf("result = %+v", result)
 	}
 }

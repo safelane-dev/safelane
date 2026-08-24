@@ -173,6 +173,23 @@ func TestFinishingFreesTheActiveSlot(t *testing.T) {
 	}
 }
 
+func TestLatestReturnsTheDetailedRecordAfterFinish(t *testing.T) {
+	s := store(t)
+	record := started(t, s)
+	record.Delta = json.RawMessage(`{"snapshot_id":"sha256:abc"}`)
+	finished, err := s.Finish(record, journal.StateCompleted, "released at 100%", "", at(10))
+	if err != nil {
+		t.Fatal(err)
+	}
+	latest, found, err := s.Latest()
+	if err != nil || !found {
+		t.Fatalf("Latest = %v, %v", found, err)
+	}
+	if latest.ID != finished.ID || latest.State != journal.StateCompleted {
+		t.Fatalf("latest = %+v, want finished record %+v", latest, finished)
+	}
+}
+
 // The normal evidence view is meant to be cheap. Older history is still on
 // disk and still readable; it loads when somebody has a concrete question.
 func TestHistoryIsBoundedToTheNewestCards(t *testing.T) {

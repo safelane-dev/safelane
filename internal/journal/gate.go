@@ -104,6 +104,9 @@ func MissingMeasurement() Measurement { return Measurement{Phase: "Running"} }
 type Observed struct {
 	State  State
 	Weight int
+	// AtGate distinguishes an indefinite canary pause from ordinary
+	// progression. Measurements may authorize promotion only at a gate.
+	AtGate bool
 	// Aborted is Argo's own abort, as opposed to a stop SafeLane asked for.
 	Aborted bool
 }

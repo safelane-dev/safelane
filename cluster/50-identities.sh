@@ -161,7 +161,7 @@ rules:
   # One object, two verbs. resourceNames pins this to the Rollout the
   # application package installed, so the privileged identity cannot touch a
   # second Rollout that happens to share the namespace. The status subresource
-  # is what `kubectl argo rollouts promote|abort` writes; without it the
+  # is what the kubectl Argo promote and abort commands write; without it the
   # natural controls fail at the boundary rather than at the decision.
   - apiGroups: ["argoproj.io"]
     resources: ["rollouts", "rollouts/status"]

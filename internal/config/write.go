@@ -142,7 +142,7 @@ func Write(path string, next []byte) (changed bool, err error) {
 //
 // The node tree locates it - which line the `policy:` key is on, and which line
 // the next top-level key starts - and the bytes between those lines are copied
-// across untouched. Re-encoding the node would round-trip the operator's
+// across untouched. Re-encoding the node would round-trip the user's
 // formatting through yaml.v3's opinions about indentation and quoting, and
 // "your lanes are still there, just reformatted" is not the promise.
 func policyBlockOf(raw []byte) (string, error) {

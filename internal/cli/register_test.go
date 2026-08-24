@@ -105,12 +105,43 @@ func TestRegisterPrintsA1(t *testing.T) {
 		SelectionPath: writeSelection(t, svc, nil),
 		ForceJSON:     false,
 		Service:       svc,
+		Apply:         true,
 	}, &terminal{&stdout}, &stderr)
 
 	if code != ExitOK {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}
 	assertGolden(t, "registration-a1.txt", stdout.String())
+}
+
+func TestRegisterPreviewsBeforeItWrites(t *testing.T) {
+	svc := paymentsService(paymentsCluster())
+	home := t.TempDir()
+	selection := writeSelection(t, svc, nil)
+	var stdout, stderr bytes.Buffer
+
+	if code := Register(context.Background(), RegisterOptions{
+		Root: ".", Home: home, SelectionPath: selection, Service: svc,
+		Confirm: strings.NewReader("not yet\n"),
+	}, &terminal{&stdout}, &stderr); code != ExitOK {
+		t.Fatalf("preview: %s", stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "application:\n  name: payments-api") {
+		t.Fatalf("full file was not previewed:\n%s", stdout.String())
+	}
+	if _, err := os.Stat(config.ForApp(home, "payments-api").File); !os.IsNotExist(err) {
+		t.Fatalf("registration wrote before confirmation: %v", err)
+	}
+
+	stdout.Reset()
+	if code := Register(context.Background(), RegisterOptions{
+		Root: ".", Home: home, SelectionPath: selection, Service: svc, Apply: true,
+	}, &stdout, &stderr); code != ExitOK {
+		t.Fatalf("apply: %s", stderr.String())
+	}
+	if _, err := os.Stat(config.ForApp(home, "payments-api").File); err != nil {
+		t.Fatalf("confirmed registration was not written: %v", err)
+	}
 }
 
 // Rule 1: no flag on either side. A pipe gets JSON; a terminal gets text.
@@ -139,7 +170,7 @@ func TestRegisterIsJSONWhenPipedAndTextAtATerminal(t *testing.T) {
 
 	var text bytes.Buffer
 	if code := Register(context.Background(), RegisterOptions{
-		Root: ".", Home: t.TempDir(), SelectionPath: selection, Service: svc,
+		Root: ".", Home: t.TempDir(), SelectionPath: selection, Service: svc, Apply: true,
 	}, &terminal{&text}, &stderr); code != ExitOK {
 		t.Fatalf("exit %d: %s", code, stderr.String())
 	}

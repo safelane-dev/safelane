@@ -11,6 +11,9 @@ import (
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/config"
+	"github.com/AndrewMaged814/safelane/internal/journal"
+	"github.com/AndrewMaged814/safelane/internal/orchestrate"
+	"github.com/AndrewMaged814/safelane/internal/release"
 	"github.com/AndrewMaged814/safelane/internal/releasepatch"
 )
 
@@ -20,10 +23,10 @@ type RunOptions struct {
 	// Confirm reads the answer to the approval question at a terminal. Nil
 	// means there is nobody to ask, which is the piped case.
 	Confirm io.Reader
-	// Apply performs the mutation. It is a port so this ticket can prove the
-	// approval gate without owning execution, which is ticket 09's.
-	Apply func(ctx context.Context, patch releasepatch.Patch) error
-	Now   func() time.Time
+	// Coordinate is the attached release seam. Nil wires the real cluster and
+	// durable journal; tests provide a complete terminal outcome.
+	Coordinate func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error)
+	Now        func() time.Time
 }
 
 // Run releases what is awaiting approval, and nothing else.
@@ -50,6 +53,22 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", unknownEnvironment(application, opts.Inspect.Environment, cfg))
 	}
 	dir := config.ForApp(opts.Inspect.Home, application).ForEnvironment(environment.Name).Dir
+	store := journal.Store{Dir: dir}
+	if active, activeFound, activeErr := store.Active(); activeErr != nil {
+		return writeResultError(stderr, "run", activeErr)
+	} else if activeFound && !active.State.Terminal() {
+		var patch releasepatch.Patch
+		if err := json.Unmarshal(active.Patch, &patch); err != nil {
+			return writeResultError(stderr, "run", release.Internal("unreadable_active_patch",
+				fmt.Sprintf("the active release patch could not be read: %v", err)))
+		}
+		finished, coordinateErr := coordinatorFor(opts, application, environment, store)(ctx, active, patch)
+		if coordinateErr != nil {
+			return writeResultError(stderr, "run", coordinateErr)
+		}
+		_ = releasepatch.ClearPending(dir)
+		return renderRunOutcome(opts, application, environment.Name, "", active.Lane, finished, stdout, stderr)
+	}
 
 	pending, found, err := releasepatch.LoadPending(dir)
 	if err != nil {
@@ -62,10 +81,12 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", releasepatch.WaitingCannotRun(application, environment.Name))
 	}
 
-	// At a terminal, ask. Piped, the frozen recommendation is the
-	// authorization and nothing is asked: a flag the caller passes on every
-	// invocation is not a safety mechanism.
-	if opts.Confirm != nil && RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderText {
+	now := opts.now()
+	approval := pending.Approval
+	// A recommendation is advice, not authorization. A terminal can collect
+	// the answer directly; an agent must have recorded the user's answer with
+	// the approval adapter before it invokes run.
+	if approval == nil && opts.Confirm != nil && RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderText {
 		fmt.Fprint(stdout, assessment.RenderApprovalQuestion(environment.Name))
 		answer, readErr := bufio.NewReader(opts.Confirm).ReadString('\n')
 		if readErr != nil && strings.TrimSpace(answer) == "" {
@@ -77,17 +98,28 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "\nNothing was changed.\n")
 			return ExitOK
 		}
-	}
-
-	now := opts.now()
-	approval := pending.Approval
-	if approval == nil {
 		granted, grantErr := releasepatch.Grant(application, environment.Name,
 			pending.Snapshot, pending.Revision, pending.Patch, pending.Analysis, true, now)
 		if grantErr != nil {
 			return writeResultError(stderr, "run", grantErr)
 		}
 		approval = &granted
+		pending.Approval = approval
+		if err := releasepatch.SavePending(dir, pending); err != nil {
+			return writeResultError(stderr, "run", err)
+		}
+	}
+	if approval == nil {
+		return writeResultError(stderr, "run", release.Invalid("explicit_approval_required", "approval",
+			"this recommendation does not have an explicit approval",
+			"Ask the user the final rollout question and record their answer before running it."))
+	}
+	if active, found, activeErr := store.Active(); activeErr != nil {
+		return writeResultError(stderr, "run", activeErr)
+	} else if found && !active.State.Terminal() {
+		return writeResultError(stderr, "run", release.Invalid("release_already_active", "release",
+			fmt.Sprintf("a release of %s to %s is already in progress", application, environment.Name),
+			"Use status, hold, continue, or stop for the active release."))
 	}
 
 	// The recheck is immediately before the cluster is touched, not at
@@ -112,30 +144,72 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", err)
 	}
 
-	// Nil means the real cluster. A test substitutes it; production does not
-	// have to remember to pass it.
-	apply := opts.Apply
-	if apply == nil {
-		apply = Cluster{Home: opts.Inspect.Home, Application: application, Environment: environment}.ApplyPatch
-	}
-	if err := apply(ctx, pending.Patch); err != nil {
+	approvalRaw, err := json.Marshal(spent)
+	if err != nil {
 		return writeResultError(stderr, "run", err)
 	}
+	patchRaw, err := json.Marshal(pending.Patch)
+	if err != nil {
+		return writeResultError(stderr, "run", err)
+	}
+	cards, err := store.History(0)
+	if err != nil {
+		return writeResultError(stderr, "run", err)
+	}
+	record := journal.Record{
+		ID:             journal.NewID(application, environment.Name, len(cards)+1, now),
+		Application:    application,
+		Environment:    environment.Name,
+		Candidate:      pending.Revision,
+		Lane:           pending.Lane,
+		Attempt:        len(cards) + 1,
+		Delta:          pending.Delta,
+		Recommendation: pending.Recommendation,
+		Patch:          patchRaw,
+		Approval:       approvalRaw,
+		Started:        now,
+		Events: []journal.Event{{
+			At: now, Kind: "approved", By: journal.ActorUser,
+			Detail: "the user approved the exact recommendation",
+		}},
+	}
 
+	finished, coordinateErr := coordinatorFor(opts, application, environment, store)(ctx, record, pending.Patch)
+	if clearErr := releasepatch.ClearPending(dir); clearErr != nil && coordinateErr == nil {
+		coordinateErr = clearErr
+	}
+	if coordinateErr != nil {
+		return writeResultError(stderr, "run", coordinateErr)
+	}
+
+	return renderRunOutcome(opts, application, environment.Name, pending.Snapshot, pending.Lane, finished, stdout, stderr)
+}
+
+func coordinatorFor(opts RunOptions, application string, environment config.Environment, store journal.Store) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
+	if opts.Coordinate != nil {
+		return opts.Coordinate
+	}
+	cluster := Cluster{Home: opts.Inspect.Home, Application: application, Environment: environment}
+	coordinator := orchestrate.Coordinator{Cluster: cluster, Store: store}
+	return coordinator.Run
+}
+
+func renderRunOutcome(opts RunOptions, application, environment, snapshot, lane string, finished journal.Record, stdout, stderr io.Writer) int {
 	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderJSON {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
 		_ = encoder.Encode(map[string]any{
 			"application": application,
-			"environment": environment.Name,
-			"snapshot":    pending.Snapshot,
-			"lane":        pending.Lane,
-			"approval":    spent,
-			"patch":       pending.Patch,
+			"environment": environment,
+			"snapshot":    snapshot,
+			"lane":        lane,
+			"state":       finished.State,
+			"outcome":     finished.Outcome,
+			"line":        finished.Status().Line(),
 		})
 		return ExitOK
 	}
-	fmt.Fprintf(stdout, "Releasing %s to %s in the %s lane.\n", application, environment.Name, pending.Lane)
+	fmt.Fprintln(stdout, finished.Status().Line())
 	return ExitOK
 }
 

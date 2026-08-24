@@ -15,12 +15,12 @@
 //
 // SafeLane used to render whole Kubernetes objects from a template it owned,
 // which meant every field in the Rollout was SafeLane's opinion whether it
-// meant to have one or not. An operator who set a resource limit by hand would
+// meant to have one or not. A user who set a resource limit by hand would
 // lose it on the next release, and the only defence was remembering to
 // template every field somebody might care about.
 //
 // A patch inverts that. The fields SafeLane can affect are the fields it names,
-// and it names two. Anything an operator does to the rest of the Rollout
+// and it names two. Anything changed on the rest of the Rollout
 // survives, including things SafeLane has never heard of.
 //
 // # Tests, in the JSON Patch sense

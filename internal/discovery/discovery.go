@@ -44,7 +44,14 @@ type Rollout struct {
 	Containers []Container `json:"containers"`
 	// Environment says whether SafeLane could release this Rollout, and why
 	// not when it could not.
-	Environment Compatibility `json:"environment"`
+	Environment   Compatibility       `json:"environment"`
+	Artifact      Compatibility       `json:"artifact"`
+	StableService string              `json:"stable_service,omitempty"`
+	CanaryService string              `json:"canary_service,omitempty"`
+	Analysis      []AnalysisReference `json:"analysis,omitempty"`
+	// Fingerprint is the exact value registration checks after the user makes
+	// a selection. Without it, discover and register cannot form one workflow.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 // Container is one inline container and the image it is running.
@@ -168,11 +175,31 @@ func (s Service) Discover(ctx context.Context, root, namespace string) (Discover
 	found.Repository, _ = s.origin(root)
 
 	for _, doc := range list.Items {
-		found.Rollouts = append(found.Rollouts, Rollout{
+		rollout := Rollout{
 			Name:        doc.Metadata.Name,
 			Containers:  containersOf(doc),
 			Environment: environmentCompatibility(doc),
-		})
+		}
+		// A structurally unsupported object needs no more cluster reads. A
+		// plausible one is inspected fully so discovery returns the fingerprint
+		// and application-owned health facts that registration requires.
+		if rollout.Environment.Supported {
+			target, inspectErr := s.Inspect(ctx, root, namespace, rollout.Name)
+			if inspectErr != nil {
+				rollout.Environment = Compatibility{Supported: false, Reasons: []Reason{{
+					Code: "rollout_details_not_readable", Explanation: inspectErr.Error(),
+				}}}
+			} else {
+				rollout.Containers = target.Containers
+				rollout.Environment = target.Environment
+				rollout.Artifact = target.Artifact
+				rollout.StableService = target.StableService
+				rollout.CanaryService = target.CanaryService
+				rollout.Analysis = target.Analysis
+				rollout.Fingerprint = target.Fingerprint
+			}
+		}
+		found.Rollouts = append(found.Rollouts, rollout)
 	}
 	sort.Slice(found.Rollouts, func(i, j int) bool { return found.Rollouts[i].Name < found.Rollouts[j].Name })
 	return found, nil

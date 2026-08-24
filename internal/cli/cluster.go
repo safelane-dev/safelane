@@ -66,6 +66,11 @@ func (c Cluster) Control(ctx context.Context, action string, _ config.Environmen
 // Observe reads what the Rollout currently says, so a stored record can be
 // reconciled against it.
 func (c Cluster) Observe(ctx context.Context, _ config.Environment) (journal.Observed, error) {
+	return c.ObserveRelease(ctx)
+}
+
+// ObserveRelease is the attached coordinator's read of the Rollout.
+func (c Cluster) ObserveRelease(ctx context.Context) (journal.Observed, error) {
 	status, err := c.executor().GetStatus(ctx)
 	if err != nil {
 		return journal.Observed{}, err
@@ -73,9 +78,13 @@ func (c Cluster) Observe(ctx context.Context, _ config.Environment) (journal.Obs
 	return journal.Observed{
 		State:   observedState(status),
 		Weight:  status.CurrentWeight,
+		AtGate:  status.State == execute.StateAtGate,
 		Aborted: status.State == execute.StateAborted,
 	}, nil
 }
+
+// Promote requests only the next Argo progression step.
+func (c Cluster) Promote(ctx context.Context) error { return c.executor().Promote(ctx) }
 
 // observedState maps Argo's own read of the Rollout onto SafeLane's eight
 // states.

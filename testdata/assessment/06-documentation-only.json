@@ -1,0 +1,12 @@
+{
+  "name": "a documentation-only change needs no invented deployment hazard",
+  "why": "The assessor is allowed to find no credible deployment hazard when the evidence supports that conclusion.",
+  "world": "documentation",
+  "expect": {"eligible": true, "action": "proceed", "lane": "fast", "asked_for_nothing": true, "approvable": true},
+  "assessment": {
+    "snapshot": "",
+    "observations": [{"statement": "The candidate changes only the refund operations documentation.", "evidence": ["changes"]}],
+    "risk": "low", "action": "proceed", "lane": "fast",
+    "rationale": "No runtime behavior changes in this candidate."
+  }
+}
