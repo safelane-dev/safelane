@@ -41,6 +41,30 @@ type ControlOptions struct {
 	Origin func(root string) (string, error)
 }
 
+// observe and control fall back to the real cluster. Nil means production;
+// a test substitutes either without production having to remember to pass one.
+func (o ControlOptions) observe(environment config.Environment) func(context.Context, config.Environment) (journal.Observed, error) {
+	if o.Observe != nil {
+		return o.Observe
+	}
+	if o.Home == "" {
+		return nil
+	}
+	return o.cluster(environment).Observe
+}
+
+func (o ControlOptions) control(environment config.Environment) func(context.Context, string, config.Environment) error {
+	if o.Control != nil {
+		return o.Control
+	}
+	return o.cluster(environment).Control
+}
+
+func (o ControlOptions) cluster(environment config.Environment) Cluster {
+	application, _ := applicationFrom(o.Root, o.Home, o.App, o.Origin)
+	return Cluster{Home: o.Home, Application: application, Environment: environment}
+}
+
 func (o ControlOptions) now() time.Time {
 	if o.Now != nil {
 		return o.Now()
@@ -89,8 +113,8 @@ func Status(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer) 
 	}
 
 	correction := ""
-	if opts.Observe != nil {
-		observed, observeErr := opts.Observe(ctx, environment)
+	if observe := opts.observe(environment); observe != nil {
+		observed, observeErr := observe(ctx, environment)
 		if observeErr != nil {
 			return writeResultError(stderr, "status", observeErr)
 		}
@@ -156,10 +180,8 @@ func control(ctx context.Context, opts ControlOptions, stdout, stderr io.Writer,
 			"Ask me to look at releasing again if you want a new one."))
 	}
 
-	if opts.Control != nil {
-		if err := opts.Control(ctx, action, environment); err != nil {
-			return writeResultError(stderr, action, err)
-		}
+	if err := opts.control(environment)(ctx, action, environment); err != nil {
+		return writeResultError(stderr, action, err)
 	}
 
 	now := opts.now()

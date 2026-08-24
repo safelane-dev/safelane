@@ -112,10 +112,14 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", err)
 	}
 
-	if opts.Apply != nil {
-		if err := opts.Apply(ctx, pending.Patch); err != nil {
-			return writeResultError(stderr, "run", err)
-		}
+	// Nil means the real cluster. A test substitutes it; production does not
+	// have to remember to pass it.
+	apply := opts.Apply
+	if apply == nil {
+		apply = Cluster{Home: opts.Inspect.Home, Application: application, Environment: environment}.ApplyPatch
+	}
+	if err := apply(ctx, pending.Patch); err != nil {
+		return writeResultError(stderr, "run", err)
 	}
 
 	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderJSON {

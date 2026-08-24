@@ -79,6 +79,12 @@ func controlOptions(t *testing.T) (ControlOptions, journal.Store) {
 		Root: ".", Home: home, Environment: "production",
 		Origin: func(string) (string, error) { return "acme/payments-api", nil },
 		Now:    func() time.Time { return at4(5) },
+		// Both ports are stated, not left nil. Nil means the real cluster, and
+		// a test that quietly reached one would be testing the network.
+		Observe: func(context.Context, config.Environment) (journal.Observed, error) {
+			return journal.Observed{State: journal.StateMonitoring, Weight: 25}, nil
+		},
+		Control: func(context.Context, string, config.Environment) error { return nil },
 	}, store
 }
 
@@ -146,6 +152,7 @@ func TestHoldPausesWithoutWideningExposure(t *testing.T) {
 		asked = action
 		return nil
 	}
+	opts.Observe = nil // hold does not read; it asks.
 
 	var stdout, stderr bytes.Buffer
 	if code := Hold(context.Background(), opts, &terminal{&stdout}, &stderr); code != ExitOK {
@@ -198,6 +205,7 @@ func TestStopAbortsAndRecordsTheReason(t *testing.T) {
 		asked = action
 		return nil
 	}
+	opts.Observe = nil // stop does not read; it asks.
 
 	var stdout, stderr bytes.Buffer
 	if code := Stop(context.Background(), opts, &terminal{&stdout}, &stderr); code != ExitOK {
