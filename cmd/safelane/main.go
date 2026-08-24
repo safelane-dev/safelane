@@ -138,8 +138,45 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "select an application outside its repository")
 	root.AddCommand(setupGroup(rt), legacyLeaf(rt, "doctor [--json]", "Check whether SafeLane can release right now", cli.DoctorCommand(rt.root), injectProject))
 	root.AddCommand(releaseGroup(rt), completionCommand(root), versionCommand())
-	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectReleaseCommand(rt), recommendCommand(rt))
+	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectReleaseCommand(rt),
+		recommendCommand(rt), runReleaseCommand(rt))
 	return root
+}
+
+// runReleaseCommand releases what is awaiting approval. There is no --yes: at a
+// terminal it asks, and piped the frozen recommendation is the authorization.
+func runReleaseCommand(rt commandRuntime) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "run <env>",
+		Short: "Release the recommendation awaiting your approval",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			forceJSON, _ := cmd.Flags().GetBool("json")
+			home, err := config.Home()
+			if err != nil {
+				return err
+			}
+			code := cli.Run(cmd.Context(), cli.RunOptions{
+				Inspect: cli.InspectOptions{
+					Root:        rt.root,
+					Home:        home,
+					Environment: args[0],
+					App:         rt.app,
+					ForceJSON:   forceJSON,
+					Cluster:     discovery.Service{},
+					Source:      &githubverify.Client{Token: os.Getenv("GITHUB_TOKEN")},
+					Registry:    oci.Resolver{Registry: oci.Remote{}},
+				},
+				Confirm: os.Stdin,
+			}, rt.stdout, rt.stderr)
+			if code != cli.ExitOK {
+				return exitError{code: code}
+			}
+			return nil
+		},
+	}
+	cmd.Flags().Bool("json", false, "force machine output at a terminal")
+	return cmd
 }
 
 // recommendCommand validates the active session's assessment against the frozen

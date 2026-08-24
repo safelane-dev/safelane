@@ -12,6 +12,7 @@ import (
 	"github.com/AndrewMaged814/safelane/internal/config"
 	"github.com/AndrewMaged814/safelane/internal/delta"
 	"github.com/AndrewMaged814/safelane/internal/release"
+	"github.com/AndrewMaged814/safelane/internal/releasepatch"
 )
 
 // RecommendOptions are everything `safelane recommend <env> <assessment|->`
@@ -53,12 +54,34 @@ func Recommend(ctx context.Context, opts RecommendOptions, stdout, stderr io.Wri
 		return writeResultError(stderr, "recommend", err)
 	}
 
-	attempt := opts.Attempt
-	if attempt < 1 {
-		attempt = 1
+	environmentDir := config.ForApp(opts.Inspect.Home, frozen.Application()).
+		ForEnvironment(frozen.Environment()).Dir
+
+	// The attempt counter lives with the pending recommendation, not with the
+	// caller. A session that could restart the count by resubmitting would
+	// have unlimited corrections, and "eventually validated" is not the same
+	// claim as "was right the first time".
+	previous, hadPrevious, err := releasepatch.LoadPending(environmentDir)
+	if err != nil {
+		return writeResultError(stderr, "recommend", err)
 	}
+	attempt := 1
+	if hadPrevious && previous.Snapshot == frozen.SnapshotID() {
+		attempt = previous.Attempts + 1
+	}
+	if opts.Attempt > 0 {
+		attempt = opts.Attempt
+	}
+
 	outcome := assessment.Resolve(raw, frozen, cfg.Policy, attempt)
 	if outcome.Correction != nil {
+		// The failed attempt is recorded before the correction is asked for,
+		// so the second one is the second one however it arrives.
+		_ = releasepatch.SavePending(environmentDir, releasepatch.Pending{
+			Application: frozen.Application(), Environment: frozen.Environment(),
+			Snapshot: frozen.SnapshotID(), Attempts: attempt,
+			Action: string(assessment.ActionWait),
+		})
 		fmt.Fprint(stderr, assessment.CorrectionRequest(outcome.Correction))
 		return ExitDecision
 	}
@@ -71,6 +94,10 @@ func Recommend(ctx context.Context, opts RecommendOptions, stdout, stderr io.Wri
 		// The recommendation is about the snapshot that carries the lane it
 		// chose, so the frozen evidence and the proposal agree from here on.
 		recommendation.SnapshotID = frozen.SnapshotID()
+	}
+
+	if err := savePending(ctx, opts, cfg, frozen, recommendation, attempt); err != nil {
+		return writeResultError(stderr, "recommend", err)
 	}
 
 	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderJSON {
@@ -134,4 +161,57 @@ func readAssessment(opts RecommendOptions) ([]byte, error) {
 		}
 		return raw, nil
 	}
+}
+
+// savePending records the recommendation awaiting approval, together with the
+// exact patch and the facts it was frozen against.
+//
+// There is at most one per Application and Environment, which is why nothing
+// addresses it by identifier. Recording the facts here is what makes the
+// pre-apply recheck a comparison rather than a re-derivation: `run` compares
+// what is true now with what was true when a person read the recommendation.
+func savePending(ctx context.Context, opts RecommendOptions, cfg config.Config,
+	frozen delta.ReleaseDelta, recommendation assessment.Recommendation, attempt int) error {
+
+	environment, _ := cfg.Environment(frozen.Environment())
+	dir := config.ForApp(opts.Inspect.Home, frozen.Application()).ForEnvironment(frozen.Environment()).Dir
+
+	pending := releasepatch.Pending{
+		Application: frozen.Application(),
+		Environment: frozen.Environment(),
+		Snapshot:    frozen.SnapshotID(),
+		Revision:    frozen.Candidate().Revision,
+		Action:      string(recommendation.Action),
+		Lane:        recommendation.Lane,
+		At:          frozen.CapturedAt(),
+		Attempts:    attempt,
+	}
+	for _, objective := range frozen.Health() {
+		pending.Analysis = append(pending.Analysis, string(objective.Name))
+	}
+
+	if recommendation.Action == assessment.ActionProceed {
+		target, err := opts.Inspect.Cluster.Inspect(ctx, opts.Inspect.Root,
+			environment.Kubernetes.Namespace, environment.Kubernetes.Rollout)
+		if err != nil {
+			return err
+		}
+		patch, err := releasepatch.Build(target.RolloutJSON, cfg.Artifact.Container,
+			frozen.Deployment().Patch.Image, recommendation.Lane, frozen.Deployment().Patch.Weights)
+		if err != nil {
+			return err
+		}
+		container, _ := target.SelectedContainer(cfg.Artifact.Container)
+		pending.Patch = patch
+		pending.Facts = releasepatch.Facts{
+			Revision:        frozen.Candidate().Revision,
+			Digest:          frozen.Candidate().Digest,
+			RunningImage:    container.Image,
+			ConfigHash:      ConfigHash(opts.Inspect.Home, frozen.Application()),
+			RolloutUID:      patch.RolloutUID,
+			ResourceVersion: patch.ResourceVersion,
+			PatchDigest:     patch.Digest(),
+		}
+	}
+	return releasepatch.SavePending(dir, pending)
 }

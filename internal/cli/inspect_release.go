@@ -2,9 +2,12 @@ package cli
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -100,9 +103,7 @@ func FreezeDelta(ctx context.Context, opts InspectOptions) (delta.ReleaseDelta, 
 	}
 	environment, ok := cfg.Environment(opts.Environment)
 	if !ok {
-		return delta.ReleaseDelta{}, github.Eligibility{}, release.Invalid("unknown_environment", "environment",
-			fmt.Sprintf("%s is not a registered environment for %s", opts.Environment, application),
-			"Register it, or name one of: "+strings.Join(cfg.EnvironmentNames(), ", ")+".")
+		return delta.ReleaseDelta{}, github.Eligibility{}, unknownEnvironment(application, opts.Environment, cfg)
 	}
 
 	target, err := opts.Cluster.Inspect(ctx, opts.Root, environment.Kubernetes.Namespace, environment.Kubernetes.Rollout)
@@ -348,4 +349,24 @@ func ownerOf(repository string) string {
 func nameOf(repository string) string {
 	_, name, _ := strings.Cut(repository, "/")
 	return name
+}
+
+// ConfigHash content-addresses an Application's configuration file.
+//
+// It is part of the pre-apply recheck: an approval was given against a
+// particular set of lanes and a particular target, and a configuration that
+// changed in between makes the approval about something else.
+func ConfigHash(home, application string) string {
+	raw, err := os.ReadFile(config.ForApp(home, application).File)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256(raw)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}
+
+func unknownEnvironment(application, environment string, cfg config.Config) error {
+	return release.Invalid("unknown_environment", "environment",
+		fmt.Sprintf("%s is not a registered environment for %s", environment, application),
+		"Register it, or name one of: "+strings.Join(cfg.EnvironmentNames(), ", ")+".")
 }
