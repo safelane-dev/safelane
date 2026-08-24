@@ -34,7 +34,7 @@ func Register(ctx context.Context, opts RegisterOptions, stdout, stderr io.Write
 		return writeResultError(stderr, "register", err)
 	}
 	if strings.TrimSpace(selection.Application) == "" {
-		name, resolveErr := ApplicationFor(opts.Root, opts.Home, opts.App)
+		name, resolveErr := applicationFrom(opts.Root, opts.Home, opts.App, opts.Service.Origin)
 		if resolveErr != nil {
 			return writeResultError(stderr, "register", resolveErr)
 		}

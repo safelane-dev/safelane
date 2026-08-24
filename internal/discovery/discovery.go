@@ -2,6 +2,7 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os/exec"
 	"sort"
@@ -92,15 +93,40 @@ type Target struct {
 
 	// Fingerprint covers exactly the facts registration depends on.
 	Fingerprint string `json:"fingerprint"`
+
+	// RolloutJSON is the Rollout exactly as the cluster returned it.
+	//
+	// It is here because two later steps need the live object: reading which
+	// Secrets and ConfigMaps the workload references, and building a patch
+	// against the container that is actually there. It carries environment
+	// values and is therefore NOT evidence: it must never be put into a
+	// ReleaseDelta, a stored record, or anything printed. Take names out of
+	// it; never carry it through.
+	RolloutJSON []byte `json:"-"`
 }
 
-// AnalysisReference is one background AnalysisTemplate the Rollout names.
+// AnalysisReference is one background AnalysisTemplate the Rollout names, read
+// as written.
+//
+// SafeLane never authors one of these and cannot change one. Everything here
+// is what the application's own template says, reported so a person can see
+// what will decide whether their release continues.
 type AnalysisReference struct {
 	Name string `json:"name"`
 	// Provider is the metric provider the template asks, title-cased for
 	// display ("Prometheus", "Datadog"). Empty when the template could not be
 	// read.
 	Provider string `json:"provider,omitempty"`
+	// Condition is the template's own success condition, verbatim.
+	Condition string `json:"condition,omitempty"`
+	// Interval is how often it measures; InitialDelay is how long it waits
+	// before the first reading.
+	Interval     string `json:"interval,omitempty"`
+	InitialDelay string `json:"initial_delay,omitempty"`
+	// Continuous is whether the analysis keeps measuring for the whole
+	// rollout. A template with a fixed `count` finishes early, and every later
+	// weight then rolls out unanalysed.
+	Continuous bool `json:"continuous"`
 	// Resolved is whether the template actually exists and could be read.
 	Resolved bool `json:"resolved"`
 }
@@ -160,19 +186,26 @@ func (s Service) Inspect(ctx context.Context, root, namespace, rollout string) (
 		return Target{}, err
 	}
 
-	doc, err := getJSON[rolloutDoc](ctx, s.runner(),
-		[]string{"get", "rollouts.argoproj.io", rollout, "-n", namespace, "-o", "json"})
+	args := []string{"get", "rollouts.argoproj.io", rollout, "-n", namespace, "-o", "json"}
+	raw, err := s.runner()(ctx, args)
 	if err != nil {
 		return Target{}, release.Invalid("rollout_not_readable", "rollout",
 			fmt.Sprintf("could not read Rollout %q in namespace %s: %v", rollout, namespace, err),
 			"Check the name, and that the current context can read Rollouts in that namespace.")
 	}
+	var doc rolloutDoc
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		return Target{}, release.Invalid("unreadable_cluster_response", "rollout",
+			fmt.Sprintf("kubectl get rollout %s did not return readable JSON: %v", rollout, err),
+			"Check that kubectl points at a working cluster and try again.")
+	}
 
 	target := Target{
-		Namespace:  namespace,
-		Context:    current,
-		Rollout:    doc.Metadata.Name,
-		Containers: containersOf(doc),
+		Namespace:   namespace,
+		Context:     current,
+		Rollout:     doc.Metadata.Name,
+		Containers:  containersOf(doc),
+		RolloutJSON: raw,
 	}
 	target.Repository, _ = s.origin(root)
 
@@ -236,6 +269,7 @@ func (s Service) resolveAnalysis(ctx context.Context, namespace string, doc roll
 		} else {
 			found.Resolved = true
 			found.Provider = providerOf(template)
+			describeMetric(&found, template)
 		}
 		refs = append(refs, found)
 	}
@@ -432,6 +466,24 @@ func providerOf(template analysisTemplateDoc) string {
 		}
 	}
 	return ""
+}
+
+// describeMetric copies the template's first metric across as written. First,
+// not merged: a template with several metrics is describing several things,
+// and inventing a summary of them would be SafeLane having an opinion about an
+// analysis it does not own.
+func describeMetric(ref *AnalysisReference, template analysisTemplateDoc) {
+	if len(template.Spec.Metrics) == 0 {
+		return
+	}
+	metric := template.Spec.Metrics[0]
+	ref.Condition = metric.SuccessCondition
+	if ref.Condition == "" && metric.FailureCondition != "" {
+		ref.Condition = "not (" + metric.FailureCondition + ")"
+	}
+	ref.Interval = metric.Interval
+	ref.InitialDelay = metric.InitialDelay
+	ref.Continuous = metric.Count == 0
 }
 
 var providerNames = map[string]string{

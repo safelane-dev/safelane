@@ -79,10 +79,19 @@ func RenderingFor(w io.Writer, forceJSON bool) Rendering {
 // ApplicationFor answers "which Application is this?" the way rule 3 says:
 // from the repository the caller is standing in, not from something they typed.
 func ApplicationFor(root, home, explicit string) (string, error) {
+	return applicationFrom(root, home, explicit, nil)
+}
+
+// applicationFrom is ApplicationFor with the origin read injected, so a
+// command can be exercised in a checkout that is not the one under test.
+func applicationFrom(root, home, explicit string, origin func(string) (string, error)) (string, error) {
 	if strings.TrimSpace(explicit) != "" {
 		return strings.TrimSpace(explicit), nil
 	}
-	repository, err := discovery.GitHubOrigin(root)
+	if origin == nil {
+		origin = discovery.GitHubOrigin
+	}
+	repository, err := origin(root)
 	if err != nil {
 		return "", release.Invalid("no_github_origin", "application",
 			"this directory has no GitHub origin, so SafeLane cannot tell which application you mean",

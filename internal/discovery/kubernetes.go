@@ -120,8 +120,14 @@ type analysisTemplateDoc struct {
 	Metadata objectMeta `json:"metadata"`
 	Spec     struct {
 		Metrics []struct {
-			Name     string         `json:"name"`
-			Provider map[string]any `json:"provider"`
+			Name             string         `json:"name"`
+			Interval         string         `json:"interval"`
+			InitialDelay     string         `json:"initialDelay"`
+			SuccessCondition string         `json:"successCondition"`
+			FailureCondition string         `json:"failureCondition"`
+			FailureLimit     int            `json:"failureLimit"`
+			Count            int            `json:"count"`
+			Provider         map[string]any `json:"provider"`
 		} `json:"metrics"`
 	} `json:"spec"`
 }
