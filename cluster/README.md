@@ -2,9 +2,21 @@
 
 Everything SafeLane needs on the target cluster, in one command.
 
+Host prerequisites are Docker, Minikube, `kubectl`, Helm, Bash, and the
+[Argo Rollouts kubectl plugin](https://argoproj.github.io/argo-rollouts/installation/#kubectl-plugin-installation)
+at the version selected by `ARGO_ROLLOUTS_VERSION`. The installer checks the
+plugin before it changes the cluster. The default demo uses
+[Argo Rollouts v1.9.1](https://github.com/argoproj/argo-rollouts/releases/tag/v1.9.1).
+
 ```bash
 ./cluster/install.sh                        # safelane-demo-api (default)
 SAFELANE_APP=<name> ./cluster/install.sh    # any app under cluster/apps/
+```
+
+From Windows PowerShell:
+
+```powershell
+& 'C:\Program Files\Git\bin\bash.exe' ./cluster/install.sh
 ```
 
 Per-app data lives in `cluster/apps/<app>/`: an `app.env` plus the two

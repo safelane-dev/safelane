@@ -25,6 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v6
       - run: sh scripts/test-installers.sh
+      - run: bash scripts/test-cluster-bootstrap.sh
 
   installer-windows:
     runs-on: windows-latest

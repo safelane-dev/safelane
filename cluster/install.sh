@@ -30,6 +30,7 @@ set -euo pipefail
 
 . "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib.sh"
 HERE="${CLUSTER_DIR}"
+ARGO_VERSION="${ARGO_ROLLOUTS_VERSION:-v1.9.1}"
 
 stage() { printf '\n\033[1;36m######## %s ########\033[0m\n' "$1"; }
 
@@ -38,9 +39,6 @@ stage() { printf '\n\033[1;36m######## %s ########\033[0m\n' "$1"; }
 # safelane-caller, which may only read rollouts -- re-running from there used to
 # fail at stage 1 with a Forbidden that minikube reported as an addon error.
 require_admin() {
-  if kubectl config get-contexts -o name | grep -Fxq safelane-admin; then
-    kubectl config use-context safelane-admin >/dev/null
-  fi
   if [ "$(kubectl auth can-i '*' '*' 2>/dev/null)" != "yes" ]; then
     echo "setup needs a cluster-admin context; current is $(kubectl config current-context)." >&2
     echo "Switch to one (kubectl config use-context safelane-admin) and retry." >&2
@@ -49,10 +47,38 @@ require_admin() {
   echo "running as $(kubectl config current-context), app ${SAFELANE_APP} in ${SAFELANE_ENVIRONMENT}"
 }
 
-require_admin
+require_argo_plugin() {
+  local reported installed
+  reported="$(kubectl argo rollouts version --short 2>/dev/null || true)"
+  installed="$(printf '%s\n' "${reported}" |
+    sed -n 's/.*\(v[0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\).*/\1/p')"
+  if [ -z "${installed}" ]; then
+    echo "The Argo Rollouts kubectl plugin is required before demo setup changes the cluster." >&2
+    echo "Install ${ARGO_VERSION} from the pinned release, then retry:" >&2
+    echo "  https://github.com/argoproj/argo-rollouts/releases/tag/${ARGO_VERSION}" >&2
+    exit 1
+  fi
+  if [ "${installed}" != "${ARGO_VERSION}" ]; then
+    echo "Argo Rollouts kubectl plugin ${installed} does not match the demo controller ${ARGO_VERSION}." >&2
+    echo "Install ${ARGO_VERSION}, then retry before changing the cluster." >&2
+    exit 1
+  fi
+}
+
+# A completed run leaves the restricted caller active. Restore the preserved
+# local administrator before an idempotent re-run. A first run has neither
+# context yet; stage 1 starts minikube and selects its new context.
+if kubectl config get-contexts -o name 2>/dev/null | grep -Fxq safelane-admin; then
+  kubectl config use-context safelane-admin >/dev/null
+fi
+
+# SafeLane uses this plugin later for progression and controls. Discovering it
+# only while seeding the baseline leaves a half-installed cluster on failure.
+require_argo_plugin
 
 stage "1/5  cluster, ingress, Argo Rollouts"
 bash "${HERE}/10-cluster.sh"
+require_admin
 
 stage "2/5  Prometheus and Grafana"
 bash "${HERE}/20-monitoring.sh"

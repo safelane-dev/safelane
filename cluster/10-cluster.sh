@@ -18,6 +18,20 @@ else
   echo "already running"
 fi
 
+# Minikube creates a profile-named context on a first run. Identity setup later
+# renames that context to safelane-admin, so an idempotent re-run must preserve
+# the renamed administrator instead of trying to switch back to a name that no
+# longer exists.
+if kubectl config get-contexts -o name | grep -Fxq safelane-admin; then
+  kubectl config use-context safelane-admin >/dev/null
+else
+  kubectl config use-context "${PROFILE}" >/dev/null
+fi
+if [ "$(kubectl auth can-i '*' '*' 2>/dev/null)" != "yes" ]; then
+  echo "the selected minikube context is not cluster-admin; refusing demo setup" >&2
+  exit 1
+fi
+
 say "ingress-nginx"
 # Required: the Rollout uses trafficRouting.nginx, so weights are a real
 # traffic split rather than an approximation by replica count.
