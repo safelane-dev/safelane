@@ -303,6 +303,7 @@ func (r Resolver) ConfirmBaseline(ctx context.Context, checker RevisionChecker, 
 func readLabels(platforms []PlatformLabels) (SourceMetadata, error) {
 	var agreed SourceMetadata
 	var agreedOn string
+	var missingOn string
 
 	for _, platform := range platforms {
 		source := strings.TrimSpace(platform.Labels[labelSource])
@@ -316,7 +317,14 @@ func readLabels(platforms []PlatformLabels) (SourceMetadata, error) {
 				return SourceMetadata{}, inconsistent(agreedOn, platform.Platform,
 					"one platform carries source metadata and another does not")
 			}
+			if missingOn == "" {
+				missingOn = platform.Platform
+			}
 			continue
+		}
+		if missingOn != "" {
+			return SourceMetadata{}, inconsistent(missingOn, platform.Platform,
+				"one platform carries source metadata and another does not")
 		}
 		if !validRevision(revision) {
 			return SourceMetadata{}, release.FailedEvidenceError("malformed_source_metadata", "artifact",

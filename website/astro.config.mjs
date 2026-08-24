@@ -10,14 +10,18 @@ export default defineConfig({
     starlight({
       title: "SafeLane",
       description: "Autonomous progressive delivery for coding agents on Argo Rollouts.",
-      favicon: "/safelane/favicon.png",
+      favicon: "/favicon.png",
       customCss: ["./src/styles/custom.css"],
       components: {
         SiteTitle: "./src/components/SiteTitle.astro"
       },
-      social: {
-        github: "https://github.com/AndrewMaged814/safelane"
-      },
+      social: [
+        {
+          icon: "github",
+          label: "GitHub",
+          href: "https://github.com/AndrewMaged814/safelane"
+        }
+      ],
       sidebar: [
         { label: "Start Here", items: [
           { label: "What is SafeLane?", slug: "start-here/introduction" },

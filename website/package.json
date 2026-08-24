@@ -12,13 +12,10 @@
   "dependencies": {
     "@fontsource-variable/instrument-sans": "^5.2.8",
     "@fontsource-variable/jetbrains-mono": "^5.2.8",
-    "@astrojs/starlight": "0.32.5",
-    "astro": "5.18.1",
-    "astro-mermaid": "^2.0.1",
-    "mermaid": "^11.14.0",
-    "sharp": "^0.33.5"
-  },
-  "overrides": {
-    "@astrojs/sitemap": "3.3.0"
+    "@astrojs/starlight": "0.41.7",
+    "astro": "7.2.4",
+    "astro-mermaid": "^2.1.0",
+    "mermaid": "^11.17.0",
+    "sharp": "^0.35.3"
   }
 }

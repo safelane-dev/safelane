@@ -58,8 +58,12 @@ for (const file of htmlFiles) {
 }
 
 const index = await readFile(new URL("index.html", dist), "utf8");
-if (!index.includes(`<link rel="canonical" href="${canonicalOrigin}${canonicalBase}"`)) {
+if (!index.includes(`<link rel="canonical" href="${canonicalOrigin}${baseHome}"`)) {
   throw new Error("The generated homepage does not use the canonical GitHub Pages URL");
+}
+
+if (!index.includes(`rel="shortcut icon" href="${canonicalBase}/favicon.png"`)) {
+  throw new Error("The generated homepage does not use the base-aware favicon URL");
 }
 
 if (siteTitleCount !== htmlFiles.length) {
