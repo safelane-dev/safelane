@@ -369,8 +369,13 @@ func redactAnalysisSecrets(value any) {
 			}
 		}
 	case []any:
-		for _, child := range current {
-			redactAnalysisSecrets(child)
+		for index, child := range current {
+			switch child.(type) {
+			case map[string]any, []any:
+				redactAnalysisSecrets(child)
+			default:
+				current[index] = "[omitted]"
+			}
 		}
 	}
 }

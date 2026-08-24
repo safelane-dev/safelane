@@ -283,6 +283,9 @@ func TestAnInvalidResultGetsOneCorrectionThenWaits(t *testing.T) {
 	if !strings.Contains(second.Recommendation.Concern, "not about the change") {
 		t.Errorf("concern = %q", second.Recommendation.Concern)
 	}
+	if !strings.Contains(second.Recommendation.NextStep, "new snapshot") || strings.Contains(second.Recommendation.NextStep, "Ask me again") {
+		t.Errorf("next step = %q", second.Recommendation.NextStep)
+	}
 }
 
 func TestAValidThirdSubmissionCannotReopenAnExhaustedSnapshot(t *testing.T) {

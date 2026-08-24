@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -295,7 +296,11 @@ type evalHandle struct {
 func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.ReleaseDelta, opts InspectOptions) agentAssessmentTurn {
 	t.Helper()
 	evidenceDir := t.TempDir()
-	allowedFiles := make([]string, 0, len(delta.ViewNames)+1+len(frozen.Handles()))
+	allowedFiles := make([]string, 0, len(delta.ViewNames)+2+len(frozen.Handles()))
+	if err := os.WriteFile(filepath.Join(evidenceDir, "snapshot.txt"), []byte(frozen.SnapshotID()+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	allowedFiles = append(allowedFiles, "snapshot.txt")
 	views := frozen.Views()
 	for _, name := range delta.ViewNames {
 		filename := name + ".txt"
@@ -331,7 +336,7 @@ func runAssessmentAgent(t *testing.T, provider, skill string, frozen delta.Relea
 	allowedFiles = append(allowedFiles, "handles.json")
 	prompt := fmt.Sprintf(`You are evaluating SafeLane's active assessment skill. Follow the Assess section below exactly.
 
-For this offline evaluation, use only the evidence files in your current directory. You must use your available read tool to open changes.txt, deployment.txt, health.txt, and history.txt, in that order, before assessing the release. handles.json maps each internal evidence handle to a controlled file. Open it and the mapped file only when a material assessment claim needs deeper evidence. Before claiming how a configured analysis covers a hazard, read its full-text handle when health.txt lists one. Do not list the directory, inspect the repository, or perform a general code review. Record the view names in the order you read them, followed by the exact IDs of any evidence handles whose mapped files you actually opened. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
+For this offline evaluation, use only the evidence files in your current directory. Open exactly one file per read operation. First use Get-Content -LiteralPath to open snapshot.txt, then changes.txt, deployment.txt, health.txt, and history.txt, in that order. snapshot.txt is the frozen snapshot ID the assessment must copy. handles.json maps each internal evidence handle to a controlled file. Open it and the mapped file only when a material assessment claim needs deeper evidence. Before claiming how a configured analysis covers a hazard, read its full-text handle when health.txt lists one. Do not list the directory, inspect the repository, or perform a general code review. Record the four view names in the order you read them, followed by the exact IDs of any evidence handles whose mapped files you actually opened. List only material questions the skill would ask, in order. Assume the user answers "I don't know" to each question, do not repeat a branch, then return the final assessment.
 
 Return JSON only with this outer shape:
 {"views_read":["changes","deployment","health","history"],"investigated":[],"general_code_review":false,"questions":[{"question":"one plain question?","why":"why the missing fact can change this deployment recommendation"}],"assessment":{the exact safelane recommend assessment object}}
@@ -495,35 +500,36 @@ func checkAgentTrace(t *testing.T, frozen delta.ReleaseDelta, turn agentAssessme
 	if turn.GeneralReview {
 		t.Error("agent performed a general code review")
 	}
-	observed := strings.Join(turn.ToolTrace, "\n")
 	allowed := map[string]bool{}
 	for _, file := range turn.AllowedFiles {
 		allowed[strings.ToLower(file)] = true
 	}
+	var readFiles []string
 	for _, read := range turn.ToolTrace {
-		if !allowedEvidenceRead(read, turn.EvidenceDir, allowed) {
+		file, ok := controlledEvidenceFile(read, turn.EvidenceDir, allowed)
+		if !ok {
 			t.Errorf("agent used a tool outside the controlled evidence allowlist: %q", read)
+			continue
 		}
+		readFiles = append(readFiles, file)
 	}
-	position := -1
-	for _, view := range delta.ViewNames {
-		next := strings.Index(observed[position+1:], view+".txt")
-		if next < 0 {
+	position := 0
+	expectedReads := append([]string{"snapshot"}, delta.ViewNames...)
+	for _, view := range expectedReads {
+		for position < len(readFiles) && readFiles[position] != view+".txt" {
+			position++
+		}
+		if position == len(readFiles) {
 			t.Errorf("tool trace did not show %s being read: %v", view, turn.ToolTrace)
 			continue
 		}
-		position += next + 1
-	}
-	for _, broad := range []string{"git status", "rg --files", "get-childitem", "ls -", "git diff", "find ", " dir "} {
-		if strings.Contains(strings.ToLower(observed), strings.ToLower(broad)) {
-			t.Errorf("agent performed a broad investigation (%s): %v", broad, turn.ToolTrace)
-		}
+		position++
 	}
 	known := map[string]bool{}
 	actual := map[string]bool{}
 	for _, handle := range frozen.Handles() {
 		known[handle.ID] = true
-		actual[handle.ID] = strings.Contains(observed, evalHandleFilename(handle.ID))
+		actual[handle.ID] = slices.Contains(readFiles, evalHandleFilename(handle.ID))
 	}
 	for _, handle := range turn.Investigated {
 		if !known[handle] {
@@ -563,33 +569,33 @@ func evalHandleFilename(id string) string {
 	return strings.NewReplacer(":", "-", "/", "-").Replace(id) + ".txt"
 }
 
-func allowedEvidenceRead(read, evidenceDir string, allowed map[string]bool) bool {
+func controlledEvidenceFile(read, evidenceDir string, allowed map[string]bool) (string, bool) {
 	lower := strings.ToLower(read)
 	// Claude's Read tool reports the path directly.
-	if !strings.Contains(lower, "get-content") && !strings.Contains(lower, "cat ") && !strings.Contains(lower, "type ") {
+	if !strings.Contains(lower, " -command ") {
 		path := filepath.Clean(read)
-		return strings.EqualFold(filepath.Dir(path), filepath.Clean(evidenceDir)) && allowed[strings.ToLower(filepath.Base(path))]
+		file := strings.ToLower(filepath.Base(path))
+		return file, strings.EqualFold(filepath.Dir(path), filepath.Clean(evidenceDir)) && allowed[file]
 	}
-	// Codex reports the shell command. Permit only a simple file-read command;
-	// chaining, expansion, and directory traversal turn it into a broader tool.
-	for _, forbidden := range []string{";", "|", "&&", "*", "?", "..", "get-childitem", "git ", "rg ", "find ", " dir "} {
-		if strings.Contains(lower, forbidden) {
-			return false
-		}
+	// Codex reports its shell wrapper. The payload must be exactly one literal
+	// read with one argument; no chaining, substitutions, comments, or extra
+	// paths can fit this grammar.
+	marker := strings.Index(lower, " -command ")
+	payload := strings.TrimSpace(read[marker+len(" -command "):])
+	if len(payload) >= 2 && payload[0] == '"' && payload[len(payload)-1] == '"' {
+		payload = payload[1 : len(payload)-1]
 	}
-	found := false
-	for _, field := range strings.Fields(read) {
-		candidate := strings.Trim(field, `"',()[]`)
-		candidate = strings.TrimSuffix(candidate, `\`)
-		base := strings.ToLower(filepath.Base(candidate))
-		if strings.HasSuffix(base, ".txt") || strings.HasSuffix(base, ".json") {
-			if !allowed[base] {
-				return false
-			}
-			found = true
-		}
+	fields := strings.Fields(payload)
+	if len(fields) != 3 || !strings.EqualFold(fields[0], "Get-Content") || !strings.EqualFold(fields[1], "-LiteralPath") {
+		return "", false
 	}
-	return found
+	path := strings.Trim(fields[2], `"'`)
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(evidenceDir, path)
+	}
+	path = filepath.Clean(path)
+	file := strings.ToLower(filepath.Base(path))
+	return file, strings.EqualFold(filepath.Dir(path), filepath.Clean(evidenceDir)) && allowed[file]
 }
 
 func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
@@ -598,20 +604,22 @@ func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 	for _, read := range []string{
 		filepath.Join(dir, "changes.txt"),
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
-		`cat changes.txt`,
 	} {
-		if !allowedEvidenceRead(read, dir, allowed) {
+		if _, ok := controlledEvidenceFile(read, dir, allowed); !ok {
 			t.Errorf("controlled read was rejected: %q", read)
 		}
 	}
 	for _, read := range []string{
 		filepath.Join("C:\\", "other", "changes.txt"),
 		`pwsh.exe -Command "Get-Content .\changes.txt; Get-ChildItem C:\\"`,
-		`cat changes.txt ../secret`,
+		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt C:\Windows\win.ini"`,
+		"pwsh.exe -Command \"Get-Content -LiteralPath .\\changes.txt`nGet-Content C:\\Windows\\win.ini\"",
+		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt # allowed"`,
+		`pwsh.exe -Command "Get-Content -LiteralPath $(Get-ChildItem)"`,
 		`git diff -- changes.txt`,
 		`pwsh.exe -Command "Get-Content .\unknown.json"`,
 	} {
-		if allowedEvidenceRead(read, dir, allowed) {
+		if _, ok := controlledEvidenceFile(read, dir, allowed); ok {
 			t.Errorf("uncontrolled read was accepted: %q", read)
 		}
 	}

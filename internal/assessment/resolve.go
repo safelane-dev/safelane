@@ -97,7 +97,7 @@ func WaitingAfterFailure(frozen delta.ReleaseDelta, reason error) Recommendation
 		Unconfirmed: "What this release changes about the running behaviour of " +
 			frozen.Application() + ".",
 		Blindspot: analysisBlindspot(frozen),
-		NextStep: "Ask me again, or tell me what this change is meant to do and I will reassess. " +
+		NextStep: "Add or correct the material release evidence, then inspect the release again to create a new snapshot. " +
 			"If you already know it is safe, you can release it another way; nothing has been changed.",
 	}
 }

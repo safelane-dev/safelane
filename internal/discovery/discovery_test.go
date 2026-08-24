@@ -204,7 +204,7 @@ func TestAnalysisBodyPreservesUnknownFieldsAndRedactsCredentials(t *testing.T) {
       "spec":{
 		"args":[{"name":"service","value":"candidate"},{"name":"api-token","value":"named-argument-secret"}],
         "dryRun":[{"metricName":"shadow"}],
-		"metrics":[{"name":"success","successCondition":"result[0] >= 0.99","provider":{"web":{"url":"https://person:password@example.test/check?token=query-secret&region=eu","headers":{"Authorization":"Bearer never-store-this"}}}}]
+		"metrics":[{"name":"success","successCondition":"result[0] >= 0.99","provider":{"web":{"url":"https://person:password@example.test/check?token=query-secret&region=eu","endpoints":["https://array-user:array-password@example.test"],"headers":{"Authorization":"Bearer never-store-this"}}}}]
       }
     }`
 	target, err := serviceWith(c).Inspect(context.Background(), ".", "safelane-demo-api", "safelane-demo-api")
@@ -217,7 +217,7 @@ func TestAnalysisBodyPreservesUnknownFieldsAndRedactsCredentials(t *testing.T) {
 			t.Errorf("analysis body is missing %s:\n%s", expected, body)
 		}
 	}
-	for _, secret := range []string{"never-store-this", "named-argument-secret", "password", "query-secret"} {
+	for _, secret := range []string{"never-store-this", "named-argument-secret", "password", "query-secret", "array-user"} {
 		if strings.Contains(body, secret) {
 			t.Fatalf("analysis body retained %q:\n%s", secret, body)
 		}
