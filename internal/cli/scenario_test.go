@@ -587,7 +587,7 @@ func controlledEvidenceFile(read, evidenceDir string, allowed map[string]bool) (
 		return "", false
 	}
 	payload := strings.TrimSpace(read[marker+len(" -command "):])
-	if len(payload) >= 2 && payload[0] == '"' && payload[len(payload)-1] == '"' {
+	if len(payload) >= 2 && (payload[0] == '"' || payload[0] == '\'') && payload[len(payload)-1] == payload[0] {
 		payload = payload[1 : len(payload)-1]
 	}
 	fields := strings.Fields(payload)
@@ -609,6 +609,7 @@ func TestAgentToolTraceAllowsOnlyControlledEvidenceReads(t *testing.T) {
 	for _, read := range []string{
 		filepath.Join(dir, "changes.txt"),
 		`pwsh.exe -Command "Get-Content -LiteralPath .\changes.txt"`,
+		`"C:\Program Files\PowerShell\7\pwsh.exe" -Command 'Get-Content -LiteralPath .\changes.txt'`,
 	} {
 		if _, ok := controlledEvidenceFile(read, dir, allowed); !ok {
 			t.Errorf("controlled read was rejected: %q", read)
