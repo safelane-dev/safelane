@@ -9,8 +9,8 @@
 <p align="center">Approve once. SafeLane checks the exact release and coordinates your existing Argo Rollout to completion or a safe stop.</p>
 
 <p align="center">
-  <a href="https://github.com/AndrewMaged814/safelane/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/AndrewMaged814/safelane/ci.yml?branch=main&style=flat-square&label=ci"></a>
-  <a href="https://andrewmaged814.github.io/safelane/"><img alt="Documentation" src="https://img.shields.io/badge/docs-read-f05a40?style=flat-square"></a>
+  <a href="https://github.com/safelane-dev/safelane/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/safelane-dev/safelane/ci.yml?branch=main&style=flat-square&label=ci"></a>
+  <a href="https://safelane-dev.github.io/safelane/"><img alt="Documentation" src="https://img.shields.io/badge/docs-read-f05a40?style=flat-square"></a>
   <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-171922?style=flat-square"></a>
 </p>
 
@@ -45,13 +45,13 @@ SafeLane works with an existing Argo canary Rollout. It does not provision a clu
 macOS and Linux:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/safelane-dev/safelane/main/docs/install.sh | sh
 ```
 
 Windows PowerShell:
 
 ```powershell
-irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
+irm https://raw.githubusercontent.com/safelane-dev/safelane/main/docs/install.ps1 | iex
 ```
 
 ## Release boundary
@@ -63,7 +63,7 @@ SafeLane can change only:
 /spec/strategy/canary/steps
 ```
 
-Read the [Quick Start](https://andrewmaged814.github.io/safelane/start-here/quick-start/), [compatibility requirements](https://andrewmaged814.github.io/safelane/reference/compatibility/), or [roadmap](https://andrewmaged814.github.io/safelane/roadmap/).
+Read the [Quick Start](https://safelane-dev.github.io/safelane/start-here/quick-start/), [compatibility requirements](https://safelane-dev.github.io/safelane/reference/compatibility/), or [roadmap](https://safelane-dev.github.io/safelane/roadmap/).
 
 SafeLane began as a DevOpsDays Cairo 2026 hackathon project.
 
