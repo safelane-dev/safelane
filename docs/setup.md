@@ -36,4 +36,4 @@ safelane register <selection-json-path|->
 
 For a local environment, run `./cluster/install.sh`.
 
-Read the [registration guide](https://andrewmaged814.github.io/safelane/guides/setting-up/) and [compatibility reference](https://andrewmaged814.github.io/safelane/reference/compatibility/).
+Read the [registration guide](https://safelane-dev.github.io/safelane/guides/setting-up/) and [compatibility reference](https://safelane-dev.github.io/safelane/reference/compatibility/).

@@ -3,7 +3,7 @@ import mermaid from "astro-mermaid";
 import starlight from "@astrojs/starlight";
 
 export default defineConfig({
-  site: "https://andrewmaged814.github.io",
+  site: "https://safelane-dev.github.io",
   base: "/safelane",
   integrations: [
     mermaid({ enableLog: false }),
@@ -19,7 +19,7 @@ export default defineConfig({
         {
           icon: "github",
           label: "GitHub",
-          href: "https://github.com/AndrewMaged814/safelane"
+          href: "https://github.com/safelane-dev/safelane"
         }
       ],
       sidebar: [

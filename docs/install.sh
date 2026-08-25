@@ -2,7 +2,7 @@
 
 set -eu
 
-REPO="${SAFELANE_REPO:-AndrewMaged814/SafeLane}"
+REPO="${SAFELANE_REPO:-safelane-dev/safelane}"
 INSTALL_DIR="${SAFELANE_INSTALL_DIR:-$HOME/.local/bin}"
 DOWNLOAD_BASE="${SAFELANE_DOWNLOAD_BASE_URL:-https://github.com/${REPO}/releases/download}"
 VERSION="${SAFELANE_VERSION:-}"

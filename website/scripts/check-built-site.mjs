@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 
 const dist = new URL("../dist/", import.meta.url);
 const docs = new URL("../src/content/docs/", import.meta.url);
-const canonicalOrigin = "https://andrewmaged814.github.io";
+const canonicalOrigin = "https://safelane-dev.github.io";
 const canonicalBase = "/safelane";
 const baseHome = `${canonicalBase}/`;
 

@@ -6,13 +6,13 @@ description: Install SafeLane and its agent skill.
 ## macOS and Linux
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/safelane-dev/safelane/main/docs/install.sh | sh
 ```
 
 ## Windows PowerShell
 
 ```powershell
-irm https://raw.githubusercontent.com/AndrewMaged814/SafeLane/main/docs/install.ps1 | iex
+irm https://raw.githubusercontent.com/safelane-dev/safelane/main/docs/install.ps1 | iex
 ```
 
 Restart Claude or Codex. The restart loads the SafeLane skill.
@@ -28,7 +28,7 @@ safelane version
 SafeLane requires Go 1.26.6 or a later version.
 
 ```bash
-git clone https://github.com/AndrewMaged814/safelane.git
+git clone https://github.com/safelane-dev/safelane.git
 cd safelane
 go build -o ./bin/safelane ./cmd/safelane
 ./bin/safelane version

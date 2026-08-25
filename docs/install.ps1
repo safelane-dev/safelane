@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-$repo = if ($env:SAFELANE_REPO) { $env:SAFELANE_REPO } else { "AndrewMaged814/SafeLane" }
+$repo = if ($env:SAFELANE_REPO) { $env:SAFELANE_REPO } else { "safelane-dev/safelane" }
 $installDir = if ($env:SAFELANE_INSTALL_DIR) {
     $env:SAFELANE_INSTALL_DIR
 } else {
