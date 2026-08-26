@@ -34,7 +34,7 @@ spec:
         # carried by the image itself, as immutable OCI metadata; an
         # environment variable in a manifest is mutable and goes stale the
         # moment the digest changes.
-        image: ghcr.io/andrewmaged814/safelane-demo-api@${BASELINE_DIGEST}
+        image: ${BASELINE_IMAGE}
         ports:
         - name: http
           containerPort: 8080
