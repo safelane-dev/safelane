@@ -125,7 +125,7 @@ func newRootCommand(rt commandRuntime) *cobra.Command {
 	root.PersistentFlags().String("app", rt.app, "name the application when this repository is registered as more than one")
 
 	root.AddCommand(discoverCommand(rt), registerCommand(rt), inspectCommand(rt),
-		recommendCommand(rt), approveCommand(rt), confirmBaselineCommand(rt), confirmBuildCommand(rt), evidenceCommand(rt), registerApplyCommand(rt))
+		recommendCommand(rt), approveCommand(rt), confirmBaselineCommand(rt), confirmBuildCommand(rt), evidenceCommand(rt), registerApplyCommand(rt), runCommand(rt))
 	root.AddCommand(naturalControls(rt)...)
 	root.AddCommand(completionCommand(root), versionCommand())
 	return root
@@ -360,6 +360,20 @@ func recommendCommand(rt commandRuntime) *cobra.Command {
 				Inspect:        rt.readers(cmd.Context(), args[0], "", jsonFlag(cmd)),
 				AssessmentPath: args[1],
 				Stdin:          os.Stdin,
+			}, rt.stdout, rt.stderr))
+		},
+	})
+}
+
+func runCommand(rt commandRuntime) *cobra.Command {
+	return withJSON(&cobra.Command{
+		Use:   "run <env>",
+		Short: "Release the recommendation awaiting your approval",
+		Args:  cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return exit(cli.Run(cmd.Context(), cli.RunOptions{
+				Inspect: rt.readers(cmd.Context(), args[0], "", jsonFlag(cmd)),
+				Confirm: os.Stdin,
 			}, rt.stdout, rt.stderr))
 		},
 	})
