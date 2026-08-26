@@ -39,7 +39,7 @@ func TestHelpListsTheWholeCommandSurface(t *testing.T) {
 		t.Fatalf("exit = %d, stderr = %s", code, stderr.String())
 	}
 	for _, command := range []string{
-		"discover", "register", "inspect", "recommend",
+		"discover", "register", "inspect", "recommend", "run",
 		"status", "hold", "continue", "stop", "proof",
 	} {
 		if !strings.Contains(stdout.String(), command) {
