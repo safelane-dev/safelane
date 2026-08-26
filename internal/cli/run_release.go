@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -58,17 +59,20 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 	if active, activeFound, activeErr := store.Active(); activeErr != nil {
 		return writeResultError(stderr, "run", activeErr)
 	} else if activeFound && !active.State.Terminal() {
+		if err := controllerIdentityReady(opts, application, environment.Name); err != nil {
+			return writeResultError(stderr, "run", err)
+		}
 		var patch releasepatch.Patch
 		if err := json.Unmarshal(active.Patch, &patch); err != nil {
 			return writeResultError(stderr, "run", release.Internal("unreadable_active_patch",
 				fmt.Sprintf("the active release patch could not be read: %v", err)))
 		}
-		finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout)(ctx, active, patch)
+		finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout, stderr)(ctx, active, patch)
 		if coordinateErr != nil {
 			return writeResultError(stderr, "run", coordinateErr)
 		}
 		_ = releasepatch.ClearPending(dir)
-		return renderRunOutcome(opts, application, environment.Name, "", active.Lane, finished, stdout, stderr)
+		return renderRunOutcome(opts, application, environment.Name, "", active.Lane, patch.Weights, finished, stdout, stderr)
 	}
 
 	pending, found, err := releasepatch.LoadPending(dir)
@@ -114,6 +118,13 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", release.Invalid("explicit_approval_required", "approval",
 			"this recommendation does not have an explicit approval",
 			"Ask the user the final rollout question and record their answer before running it."))
+	}
+	// Check the privileged identity before re-reading mutable facts or spending
+	// approval. Setup writes this derived file; registration deliberately does
+	// not create Kubernetes credentials. A missing file should therefore name
+	// the setup gap directly, not fail later as an opaque kubectl error.
+	if err := controllerIdentityReady(opts, application, environment.Name); err != nil {
+		return writeResultError(stderr, "run", err)
 	}
 	if active, found, activeErr := store.Active(); activeErr != nil {
 		return writeResultError(stderr, "run", activeErr)
@@ -175,7 +186,7 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		}},
 	}
 
-	finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout)(ctx, record, pending.Patch)
+	finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout, stderr)(ctx, record, pending.Patch)
 	if clearErr := releasepatch.ClearPending(dir); clearErr != nil && coordinateErr == nil {
 		coordinateErr = clearErr
 	}
@@ -183,25 +194,49 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		return writeResultError(stderr, "run", coordinateErr)
 	}
 
-	return renderRunOutcome(opts, application, environment.Name, pending.Snapshot, pending.Lane, finished, stdout, stderr)
+	return renderRunOutcome(opts, application, environment.Name, pending.Snapshot, pending.Lane, pending.Patch.Weights, finished, stdout, stderr)
 }
 
-func coordinatorFor(opts RunOptions, application string, environment config.Environment, store journal.Store, stdout io.Writer) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
+func controllerIdentityReady(opts RunOptions, application, environment string) error {
+	// A supplied coordinator is the test/embedding seam and owns its own
+	// credentials. The production coordinator always uses the derived file.
+	if opts.Coordinate != nil {
+		return nil
+	}
+	path := config.ForApp(opts.Inspect.Home, application).ForEnvironment(environment).ControllerKubeconfig
+	if _, err := os.Stat(path); err == nil {
+		return nil
+	} else if !os.IsNotExist(err) {
+		return release.UnknownEvidenceError("controller_identity_unreadable", "identity",
+			fmt.Sprintf("could not read the controller identity at %s: %v", path, err),
+			"Fix the file permissions, then run this release again.")
+	}
+	return release.MissingEvidenceError("controller_identity_missing", "identity",
+		fmt.Sprintf("the controller identity is missing at %s", path),
+		"Run the SafeLane identity setup for this Application and Environment, then run this release again.")
+}
+
+func coordinatorFor(opts RunOptions, application string, environment config.Environment, store journal.Store, stdout, stderr io.Writer) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
 	if opts.Coordinate != nil {
 		return opts.Coordinate
 	}
 	cluster := Cluster{Home: opts.Inspect.Home, Application: application, Environment: environment}
 	coordinator := orchestrate.Coordinator{Cluster: cluster, Store: store}
-	// Progress goes to the same stream as the outcome, one line per movement, so
-	// the wait reads as a log afterwards. JSON callers get nothing here: the
-	// single object printed at the end is the whole contract for that mode, and
-	// interleaving progress lines would break it.
-	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderText {
-		coordinator.Progress = func(step orchestrate.Step) {
-			fmt.Fprintln(stdout, renderStep(step))
-		}
+	// Keep stdout as one valid JSON object for agents while still making an
+	// attached run observable: machine-mode progress goes to stderr. At a
+	// terminal, progress and the final outcome remain one readable stdout log.
+	progress := runProgressWriter(opts, stdout, stderr)
+	coordinator.Progress = func(step orchestrate.Step) {
+		fmt.Fprintln(progress, renderStep(step))
 	}
 	return coordinator.Run
+}
+
+func runProgressWriter(opts RunOptions, stdout, stderr io.Writer) io.Writer {
+	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderJSON {
+		return stderr
+	}
+	return stdout
 }
 
 // renderStep is one progress line: the time, what the release is doing, and the
@@ -217,7 +252,7 @@ func renderStep(step orchestrate.Step) string {
 	return line
 }
 
-func renderRunOutcome(opts RunOptions, application, environment, snapshot, lane string, finished journal.Record, stdout, stderr io.Writer) int {
+func renderRunOutcome(opts RunOptions, application, environment, snapshot, lane string, weights []int, finished journal.Record, stdout, stderr io.Writer) int {
 	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderJSON {
 		encoder := json.NewEncoder(stdout)
 		encoder.SetIndent("", "  ")
@@ -226,6 +261,7 @@ func renderRunOutcome(opts RunOptions, application, environment, snapshot, lane 
 			"environment": environment,
 			"snapshot":    snapshot,
 			"lane":        lane,
+			"weights":     weights,
 			"state":       finished.State,
 			"outcome":     finished.Outcome,
 			"line":        finished.Status().Line(),

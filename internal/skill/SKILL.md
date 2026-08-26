@@ -171,6 +171,12 @@ pass the user's exact words to `safelane approve <env> <answer>`, then run
 session disconnects, run the same command again; SafeLane reconnects to the
 active attempt and does not reapply the patch.
 
+While `run` is attached, relay its progress lines exactly. Do not infer the
+current percentage from elapsed time or restate the lane from memory. At the
+terminal result, use the returned `weights`, `state`, and `line` fields; a
+completed release is at full exposure even if Argo retains an earlier canary
+weight in status.
+
 A previous "yes" about evidence or setup is not release approval. New material
 evidence requires a new recommendation and approval.
 

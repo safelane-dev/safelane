@@ -212,9 +212,11 @@ func (e *Eligibility) blockChecks(in EligibilityInput) {
 // Three ways, in order of how little a person has to do:
 //
 //  1. The container's provenance names the run. Nothing to ask.
-//  2. Without provenance, SafeLane lists every successful exact-revision run
-//     and requires a release-scoped confirmation. A required check proves
-//     that code passed CI; it does not prove which run built this container.
+//  2. Without provenance, one successful exact-revision run is the only
+//     possible producer and needs no question. Multiple successful runs are
+//     listed for release-scoped confirmation. A required check proves that
+//     code passed CI; it does not prove which of several runs built this
+//     container.
 func (e *Eligibility) blockBuild(in EligibilityInput) {
 	if in.ArtifactSource.Method == oci.BindingCIProvenance {
 		return
@@ -225,6 +227,13 @@ func (e *Eligibility) blockBuild(in EligibilityInput) {
 			fmt.Sprintf("No workflow run succeeded for %s, so nothing is known to have produced this container.",
 				short(in.Candidate.Revision.SHA)),
 			"Wait for the build to finish, or fix it.")
+		return
+	}
+	// The artifact labels already bind this digest to the exact repository and
+	// revision. If GitHub reports exactly one successful workflow for that
+	// revision, there is no choice for a person to disambiguate. Multiple runs
+	// still require explicit provenance or a release-scoped confirmation.
+	if len(successful) == 1 {
 		return
 	}
 	for _, run := range successful {

@@ -93,6 +93,42 @@ func TestCoordinatorStaysAttachedAndPromotesAfterFreshMeasurements(t *testing.T)
 	}
 }
 
+func TestCoordinatorReportsLiveExposureWhileItStaysAttached(t *testing.T) {
+	store := journal.Store{Dir: t.TempDir()}
+	cluster := &cluster{
+		observed: []journal.Observed{
+			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
+			{State: journal.StateCompleted, Weight: 50},
+		},
+		measurements: []journal.Measurement{{Phase: "Running", Successful: 1, Count: 1}},
+	}
+	var steps []orchestrate.Step
+	coordinator := orchestrate.Coordinator{
+		Cluster: cluster, Store: store, Now: time.Now, Sleep: func(time.Duration) {},
+		Progress: func(step orchestrate.Step) { steps = append(steps, step) },
+	}
+
+	finished, err := coordinator.Run(context.Background(), releaseRecord(), releasepatch.Patch{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if finished.Weight != 100 {
+		t.Fatalf("completed weight = %d, want 100", finished.Weight)
+	}
+	var saw25, saw100 bool
+	for _, step := range steps {
+		if step.Weight == 25 {
+			saw25 = true
+		}
+		if step.State == journal.StateCompleted && step.Weight == 100 {
+			saw100 = true
+		}
+	}
+	if !saw25 || !saw100 {
+		t.Fatalf("progress = %+v, want 25%% gate and completed 100%%", steps)
+	}
+}
+
 func TestCoordinatorNeverPromotesOnAnOldMeasurement(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	store := journal.Store{Dir: t.TempDir()}

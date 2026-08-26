@@ -233,7 +233,7 @@ func TestProvenanceIdentifiesTheProducingRunWithoutAsking(t *testing.T) {
 	}
 }
 
-func TestOneSuccessfulRunStillNeedsReleaseScopedConfirmation(t *testing.T) {
+func TestOneSuccessfulRunIsSelectedWithoutAsking(t *testing.T) {
 	in := eligible()
 	in.Protection = github.Repository{FullName: "acme/payments-api", DefaultBranch: "main"}
 	in.Checks.Workflows = []github.WorkflowRun{
@@ -241,10 +241,8 @@ func TestOneSuccessfulRunStillNeedsReleaseScopedConfirmation(t *testing.T) {
 	}
 
 	in.ConfirmedWorkflowID = 0
-	assertBlocker(t, github.EvaluateEligibility(in), "build_provenance_ambiguous")
-	in.ConfirmedWorkflowID = 42
 	if result := github.EvaluateEligibility(in); !result.Eligible {
-		t.Fatalf("the confirmed exact-revision run remained blocked: %s", blockerCodes(result))
+		t.Fatalf("the only successful exact-revision run remained blocked: %s", blockerCodes(result))
 	}
 }
 

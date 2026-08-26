@@ -422,6 +422,7 @@ func TestRunIsJSONWhenPiped(t *testing.T) {
 	var result struct {
 		Application string        `json:"application"`
 		Lane        string        `json:"lane"`
+		Weights     []int         `json:"weights"`
 		State       journal.State `json:"state"`
 		Outcome     string        `json:"outcome"`
 	}
@@ -431,7 +432,38 @@ func TestRunIsJSONWhenPiped(t *testing.T) {
 	if result.Application != "payments-api" || result.Lane != "fast" {
 		t.Errorf("result = %+v", result)
 	}
+	if len(result.Weights) != 2 || result.Weights[0] != 50 || result.Weights[1] != 100 {
+		t.Errorf("weights = %v", result.Weights)
+	}
 	if result.State != journal.StateCompleted || result.Outcome != "released" {
 		t.Errorf("result = %+v", result)
+	}
+}
+
+func TestAttachedJSONRunKeepsProgressOffStdout(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	if got := runProgressWriter(RunOptions{}, &stdout, &stderr); got != &stderr {
+		t.Fatal("machine-mode progress was not routed to stderr")
+	}
+	terminalOut := &terminal{&stdout}
+	if got := runProgressWriter(RunOptions{}, terminalOut, &stderr); got != terminalOut {
+		t.Fatal("terminal progress was not kept with the readable stdout log")
+	}
+}
+
+func TestRunNamesTheMissingControllerIdentityBeforeSpendingApproval(t *testing.T) {
+	opts := recommended(t)
+	approvePending(t, opts, "release it")
+	run := runOptions(opts)
+	run.Coordinate = nil
+
+	var stdout, stderr bytes.Buffer
+	if code := Run(context.Background(), run, &stdout, &stderr); code == ExitOK {
+		t.Fatal("run accepted a release without its controller identity")
+	}
+	want := config.ForApp(opts.Home, "payments-api").ForEnvironment("production").ControllerKubeconfig
+	if !strings.Contains(stderr.String(), "controller identity is missing") ||
+		!strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want missing identity and %q", stderr.String(), want)
 	}
 }

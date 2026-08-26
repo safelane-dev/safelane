@@ -71,6 +71,20 @@ func TestGetStatus_CurrentWeight_PrefersTheObservedTrafficWeight(t *testing.T) {
 	}
 }
 
+func TestGetStatus_CompleteMeansFullExposureEvenWhenArgoRetainsTheLastGate(t *testing.T) {
+	fr := &fakeRunner{}
+	fr.enqueue(`{"status":{"phase":"Healthy","stableRS":"candidate","currentPodHash":"candidate",`+
+		`"currentStepIndex":3,"canary":{"weights":{"canary":{"weight":50}}}},`+
+		`"spec":{"strategy":{"canary":{"steps":[{"setWeight":25},{"pause":{}},{"setWeight":50},{"pause":{}}]}}}}`, nil)
+	status, err := newTestExecutor(fr).GetStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetStatus: %v", err)
+	}
+	if status.State != execute.StateComplete || status.CurrentWeight != 100 {
+		t.Fatalf("completed status = %+v, want full exposure", status)
+	}
+}
+
 func TestGetStatus_ReportsGenerationAndArgoMessage(t *testing.T) {
 	fr := &fakeRunner{}
 	fr.enqueue(`{"metadata":{"generation":8,"annotations":{"safelane.dev/release-id":"rel_01ARZ3NDEKTSV4RRFFQ69G5FAV"}},"status":{"observedGeneration":"7","phase":"Degraded",`+

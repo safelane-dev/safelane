@@ -172,9 +172,17 @@ func parseStatus(raw []byte) (Status, error) {
 		return Status{}, release.Internal("unparseable_rollout_status",
 			fmt.Sprintf("kubectl get rollout -o json did not decode: %v", err))
 	}
+	state := classifyState(doc)
 	weight, stepsCompleted := currentWeight(doc)
+	// Once Argo has made the candidate ReplicaSet stable, the release is at
+	// full exposure. Some traffic routers retain the last canary gate in
+	// status.canary.weights after promotion; that value is historical at this
+	// point and must not leak into release proof as the final exposure.
+	if state == StateComplete {
+		weight = 100
+	}
 	return Status{
-		State:              classifyState(doc),
+		State:              state,
 		ReleaseID:          doc.Metadata.Annotations.ReleaseID,
 		Generation:         int64(doc.Metadata.Generation),
 		ObservedGeneration: int64(doc.Status.ObservedGeneration),

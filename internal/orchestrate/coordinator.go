@@ -159,9 +159,16 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 
 		switch observed.State {
 		case journal.StateCompleted:
+			// A completed Argo rollout has promoted the candidate to stable and
+			// therefore represents full exposure, even when a router retains the
+			// last canary gate in its status fields.
+			record.Weight = 100
+			if observed.Weight != 100 {
+				c.report(journal.StateCompleted, 100, "")
+			}
 			record, err = c.Store.Append(record, journal.Event{
 				At: c.now(), Kind: "completed", By: journal.ActorArgo,
-				Detail: "Argo completed the rollout", Weight: observed.Weight,
+				Detail: "Argo completed the rollout", Weight: 100,
 			})
 			if err != nil {
 				return record, err
