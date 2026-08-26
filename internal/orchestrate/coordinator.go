@@ -32,6 +32,20 @@ type Coordinator struct {
 	Now          func() time.Time
 	Sleep        func(time.Duration)
 	PollInterval time.Duration
+	// Progress reports a change worth showing someone waiting at a terminal.
+	// It is called when the exposure moves, not once per poll, so a rollout
+	// sitting in analysis stays quiet instead of repeating itself. Nil means
+	// the caller does not want progress, which is how every non-interactive
+	// caller and every test behaves.
+	Progress func(Step)
+}
+
+// Step is one reportable movement in a release.
+type Step struct {
+	At     time.Time
+	State  journal.State
+	Weight int
+	Detail string
 }
 
 func (c Coordinator) now() time.Time {
@@ -39,6 +53,13 @@ func (c Coordinator) now() time.Time {
 		return c.Now().UTC()
 	}
 	return time.Now().UTC()
+}
+
+func (c Coordinator) report(state journal.State, weight int, detail string) {
+	if c.Progress == nil {
+		return
+	}
+	c.Progress(Step{At: c.now(), State: state, Weight: weight, Detail: detail})
 }
 
 func (c Coordinator) sleep() {
@@ -98,7 +119,12 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 		if err != nil {
 			return record, err
 		}
+		c.report(record.State, record.Weight, "the approved image and canary steps were applied")
 	}
+
+	// -1 rather than 0 so an opening observation of 0% is still reported: 0 is a
+	// real exposure a caller should see, not the absence of one.
+	reportedWeight := -1
 
 	for {
 		if err := ctx.Err(); err != nil {
@@ -126,6 +152,10 @@ func (c Coordinator) Run(ctx context.Context, record journal.Record, patch relea
 			return record, err
 		}
 		record.Weight = observed.Weight
+		if observed.Weight != reportedWeight {
+			c.report(observed.State, observed.Weight, "")
+			reportedWeight = observed.Weight
+		}
 
 		switch observed.State {
 		case journal.StateCompleted:

@@ -63,7 +63,7 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 			return writeResultError(stderr, "run", release.Internal("unreadable_active_patch",
 				fmt.Sprintf("the active release patch could not be read: %v", err)))
 		}
-		finished, coordinateErr := coordinatorFor(opts, application, environment, store)(ctx, active, patch)
+		finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout)(ctx, active, patch)
 		if coordinateErr != nil {
 			return writeResultError(stderr, "run", coordinateErr)
 		}
@@ -175,7 +175,7 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 		}},
 	}
 
-	finished, coordinateErr := coordinatorFor(opts, application, environment, store)(ctx, record, pending.Patch)
+	finished, coordinateErr := coordinatorFor(opts, application, environment, store, stdout)(ctx, record, pending.Patch)
 	if clearErr := releasepatch.ClearPending(dir); clearErr != nil && coordinateErr == nil {
 		coordinateErr = clearErr
 	}
@@ -186,13 +186,35 @@ func Run(ctx context.Context, opts RunOptions, stdout, stderr io.Writer) int {
 	return renderRunOutcome(opts, application, environment.Name, pending.Snapshot, pending.Lane, finished, stdout, stderr)
 }
 
-func coordinatorFor(opts RunOptions, application string, environment config.Environment, store journal.Store) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
+func coordinatorFor(opts RunOptions, application string, environment config.Environment, store journal.Store, stdout io.Writer) func(context.Context, journal.Record, releasepatch.Patch) (journal.Record, error) {
 	if opts.Coordinate != nil {
 		return opts.Coordinate
 	}
 	cluster := Cluster{Home: opts.Inspect.Home, Application: application, Environment: environment}
 	coordinator := orchestrate.Coordinator{Cluster: cluster, Store: store}
+	// Progress goes to the same stream as the outcome, one line per movement, so
+	// the wait reads as a log afterwards. JSON callers get nothing here: the
+	// single object printed at the end is the whole contract for that mode, and
+	// interleaving progress lines would break it.
+	if RenderingFor(stdout, opts.Inspect.ForceJSON) == RenderText {
+		coordinator.Progress = func(step orchestrate.Step) {
+			fmt.Fprintln(stdout, renderStep(step))
+		}
+	}
 	return coordinator.Run
+}
+
+// renderStep is one progress line: the time, what the release is doing, and the
+// exposure it is doing it at.
+func renderStep(step orchestrate.Step) string {
+	line := fmt.Sprintf("%s  %-12s", step.At.Local().Format("15:04:05"), string(step.State))
+	if step.Weight >= 0 {
+		line += fmt.Sprintf(" %d%%", step.Weight)
+	}
+	if step.Detail != "" {
+		line += "  " + step.Detail
+	}
+	return line
 }
 
 func renderRunOutcome(opts RunOptions, application, environment, snapshot, lane string, finished journal.Record, stdout, stderr io.Writer) int {

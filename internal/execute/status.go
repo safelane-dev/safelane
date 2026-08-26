@@ -195,17 +195,37 @@ func restorationComplete(doc rolloutStatusDoc) bool {
 	if !doc.Status.Abort && doc.Status.Phase != "Degraded" {
 		return false
 	}
-	if doc.Status.StableRS == "" || doc.Status.Replicas == nil ||
-		doc.Status.ReadyReplicas == nil || doc.Status.UpdatedReplicas == nil {
+	// A Rollout with no replicas at all has nothing to restore, and stableRS is
+	// what a restoration converges onto, so both must be present to judge one.
+	// currentPodHash deliberately is not compared against stableRS: after an
+	// abort Argo leaves it pointing at the rejected canary ReplicaSet, so
+	// requiring them equal would reject every completed rollback.
+	if doc.Status.StableRS == "" || doc.Status.Replicas == nil || *doc.Status.Replicas == 0 {
 		return false
 	}
-	if *doc.Status.UpdatedReplicas != 0 || *doc.Status.ReadyReplicas < *doc.Status.Replicas {
+	// Absent means zero. Argo omits these counters rather than serialising a 0,
+	// so a fully rolled-back Rollout reports no updatedReplicas field at all --
+	// the strongest evidence restoration finished. Reading absence as "unknown"
+	// inverted that, held the release in monitoring forever, and left run
+	// attached to an attempt that had already ended.
+	if zeroIfAbsent(doc.Status.UpdatedReplicas) != 0 {
 		return false
 	}
-	if weight := doc.Status.Canary.Weights.Canary.Weight; weight != nil && *weight != 0 {
+	if zeroIfAbsent(doc.Status.ReadyReplicas) < *doc.Status.Replicas {
+		return false
+	}
+	if zeroIfAbsent(doc.Status.Canary.Weights.Canary.Weight) != 0 {
 		return false
 	}
 	return true
+}
+
+// zeroIfAbsent reads an omitted Kubernetes counter as the zero it stands for.
+func zeroIfAbsent(value *int) int {
+	if value == nil {
+		return 0
+	}
+	return *value
 }
 
 func rolloutImageDigest(doc rolloutStatusDoc) string {
