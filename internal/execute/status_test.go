@@ -113,6 +113,18 @@ func TestGetStatus_OnlyReportsRestoredAfterStableCapacityAndTrafficAreRestored(t
 			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":3,"updatedReplicas":0,"canary":{"weights":{"canary":{"weight":0}}}}}`,
 		},
 		{
+			// The document a real rolled-back Rollout serves. Argo omits
+			// updatedReplicas rather than serialising a 0, and leaves
+			// currentPodHash on the rejected canary ReplicaSet.
+			name: "restored, with the zero counter omitted as Argo omits it",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"86bf8c74db","currentPodHash":"854fd9b6c8","replicas":2,"readyReplicas":2,"availableReplicas":2,"canary":{}}}`,
+			want: true,
+		},
+		{
+			name: "not restored while a canary replica is still up, counter omitted",
+			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","replicas":4,"readyReplicas":3,"canary":{}}}`,
+		},
+		{
 			name: "replica restoration evidence is absent",
 			doc:  `{"status":{"phase":"Degraded","abort":true,"stableRS":"stable","canary":{"weights":{"canary":{"weight":0}}}}}`,
 		},

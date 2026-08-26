@@ -154,3 +154,70 @@ func TestCoordinatorRecordsArgoAnalysisFailureWithoutIssuingAbort(t *testing.T) 
 		t.Fatalf("failure attribution = %+v", finished.Events)
 	}
 }
+
+func TestCoordinatorReportsEachMovementInExposureOnce(t *testing.T) {
+	store := journal.Store{Dir: t.TempDir()}
+	cluster := &cluster{
+		observed: []journal.Observed{
+			// 25 twice: the second is a poll that saw no movement, and it must
+			// not produce a second line, or a slow analysis would bury the
+			// release in repetition.
+			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
+			{State: journal.StateMonitoring, Weight: 25, AtGate: true},
+			{State: journal.StateMonitoring, Weight: 50, AtGate: true},
+			{State: journal.StateCompleted, Weight: 100},
+		},
+		measurements: []journal.Measurement{
+			{Phase: "Running", Successful: 1, Count: 1},
+			{Phase: "Running", Successful: 2, Count: 2},
+			{Phase: "Running", Successful: 3, Count: 3},
+		},
+	}
+	clock := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
+	var steps []orchestrate.Step
+	coordinator := orchestrate.Coordinator{
+		Cluster: cluster, Store: store,
+		Now:      func() time.Time { clock = clock.Add(time.Second); return clock },
+		Sleep:    func(time.Duration) {},
+		Progress: func(step orchestrate.Step) { steps = append(steps, step) },
+	}
+
+	if _, err := coordinator.Run(context.Background(), releaseRecord(), releasepatch.Patch{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var weights []int
+	for _, step := range steps[1:] { // steps[0] is the apply
+		weights = append(weights, step.Weight)
+	}
+	want := []int{25, 50, 100}
+	if len(weights) != len(want) {
+		t.Fatalf("reported weights = %v, want %v", weights, want)
+	}
+	for i := range want {
+		if weights[i] != want[i] {
+			t.Fatalf("reported weights = %v, want %v", weights, want)
+		}
+	}
+	if steps[0].Detail == "" {
+		t.Fatal("the apply should be reported, so the wait is not silent from the first second")
+	}
+}
+
+func TestCoordinatorReportsNothingWhenNoProgressIsWanted(t *testing.T) {
+	store := journal.Store{Dir: t.TempDir()}
+	cluster := &cluster{
+		observed:     []journal.Observed{{State: journal.StateCompleted, Weight: 100}},
+		measurements: []journal.Measurement{},
+	}
+	clock := time.Date(2026, 8, 24, 8, 0, 0, 0, time.UTC)
+	coordinator := orchestrate.Coordinator{
+		Cluster: cluster, Store: store,
+		Now:   func() time.Time { clock = clock.Add(time.Second); return clock },
+		Sleep: func(time.Duration) {},
+	}
+
+	if _, err := coordinator.Run(context.Background(), releaseRecord(), releasepatch.Patch{}); err != nil {
+		t.Fatal(err)
+	}
+}
