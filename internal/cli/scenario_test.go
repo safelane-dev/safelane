@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AndrewMaged814/safelane/internal/assessment"
 	"github.com/AndrewMaged814/safelane/internal/delta"
@@ -854,24 +855,25 @@ func checkDirection(t *testing.T, s scenario, r assessment.Recommendation, text 
 	}
 }
 
-// checkApprovability is the approval isolation check: a waiting recommendation
-// cannot be run, and a proceeding one can.
+// checkApprovability is the approval isolation check: a waiting
+// recommendation cannot be approved, and a proceeding one can. Approve is the
+// gate that decides this -- it refuses anything whose action is not proceed --
+// so the property is checked there rather than through execution.
 func checkApprovability(t *testing.T, s scenario, opts InspectOptions) {
 	t.Helper()
-	if s.Expect.Approvable {
-		approvePending(t, opts, "approve this")
-	}
 	var stdout, stderr bytes.Buffer
-	code := Run(context.Background(), RunOptions{
-		Inspect:    opts,
-		Coordinate: completingCoordinator(nil),
+	code := Approve(context.Background(), ApproveOptions{
+		Root: ".", Home: opts.Home, Environment: "production",
+		Origin: func(string) (string, error) { return "acme/payments-api", nil },
+		Answer: "approve this",
+		Now:    func() time.Time { return time.Date(2026, 8, 21, 12, 29, 0, 0, time.UTC) },
 	}, &stdout, &stderr)
 
 	if s.Expect.Approvable && code != ExitOK {
-		t.Errorf("a proceeding recommendation could not be run: %s", stderr.String())
+		t.Errorf("a proceeding recommendation could not be approved: %s", stderr.String())
 	}
 	if !s.Expect.Approvable && code == ExitOK {
-		t.Error("something that should not have been approvable was run")
+		t.Error("something that should not have been approvable was approved")
 	}
 	if !s.Expect.Approvable && !strings.Contains(stderr.String(), "wait") {
 		t.Errorf("the refusal should say it is waiting: %s", stderr.String())
